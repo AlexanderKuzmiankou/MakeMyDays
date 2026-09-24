@@ -2,21 +2,25 @@
 
 **Live:** [makemydays.cc](https://makemydays.cc)
 
-> A personal AI morning briefing system with a purpose to assist you and make you day and it's planning easier and more pleasant.
+> A personal assistant and tracking system with a purpose to help you make your day easier and more organized.
 
 MakeMyDays is a self-hosted web-app which is used as a personal assistant and organizer. It covers multiple areas of your life and ensures an easy and intuitive tracking of your tasks, calendars, budget, etc. 
 It can read your Google Calendar entries and the tasks from it, track your habits, organize your budget, keep track of your spendings and your shopping lists.
-Built from scratch as a DevOps learning project. Touching cloud infrastructure, containers, CI/CD, Kubernetes and monitoring.
+Built from scratch. Touching cloud infrastructure, containers, CI/CD, Kubernetes and monitoring. AI features to be added.
 
 ---
 
 ## What it does
 
-1. WebApp as a central hub for your life
-2. AI functions to help you organize your day
-3. Stores important information for multiple purposes
+1. WebApp (mobile app in the future) as a central hub
+2. Tracking of calendars and tasks
+3. Tracking of habits
+4. Shopping lists
+5. Budgeting assistant
+6. Shared costs tracker
+7. Notes
 
-The goal of this project is to create a web dashboard to improve tracking of various parts of life all in one app. At the same time, to learn DevOps principles and infrastructure.
+The goal of this project is to create a web dashboard to improve tracking of various parts of life all in one app.
 
 ---
 
@@ -48,10 +52,10 @@ Browser → Cloudflare Tunnel → Raspberry Pi 3B+
 | Messaging | Telegram Bot API |
 | TTS | AWS Polly (Phase 5) |
 | Container | Docker |
-| Cloud | AWS (EC2 → EKS) [Replaced with a Raspberry Pi 3B+ for cost optimization purposes]|
+| Cloud | AWS (EC2 → EKS) [Replaced with a Raspberry Pi 3B+ during development]|
 | IaC | Terraform |
 | CI/CD | GitHub Actions |
-| Orchestration | Kubernetes (maybe local only) |
+| Orchestration | Kubernetes [Currently not on raspberry because of limited resources] |
 | Monitoring | Grafana & Prometheus |
 
 ---
@@ -59,7 +63,7 @@ Browser → Cloudflare Tunnel → Raspberry Pi 3B+
 ## Project structure
 
 ```
-Will be updated soon
+Check Project in this Repo
 ```
 
 ---
@@ -68,8 +72,6 @@ Will be updated soon
 
 - Python 3.12+
 - A Google Cloud project with Calendar API enabled
-- An Anthropic API key
-- A Telegram bot token (from @BotFather)
 
 ### Local setup
 
@@ -87,22 +89,16 @@ python app/main.py
 ```
 ---
 
-## Roadmap
-
-See [ROADMAP.md](./ROADMAP.md) for the full phase-by-phase plan.
-
----
-
 ## Why this project exists
 
-I'm a systems engineer (mechatronics background) learning DevOps and modern cloud infrastructure. This project is designed to touch every layer of a real production system: from a Python script all the way to Kubernetes and monitoring, while building something I'll actually use every day.
+I'm a DevOps engineer with a systems engineering background. This project is designed to touch every layer of a real production system: from a Python script all the way to Kubernetes and monitoring, while building something I'll actually use every day and expanding my knowledge and experience.
 
 ---
 
 ## Key Engineering Decisions
 
 - **Raspberry Pi over EC2** -> migrated from AWS EC2 to a self-hosted Pi 
-  to eliminate ongoing cloud costs while maintaining full functionality
+  to eliminate ongoing cloud costs during development phase
 - **Cloudflare Tunnel** -> provides public HTTPS access without port 
   forwarding or a static IP, with free SSL termination
 - **SSM Parameter Store** -> all secrets managed in AWS SSM, never stored 
