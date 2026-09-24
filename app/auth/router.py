@@ -2,7 +2,11 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, field_validator
 
 from app.auth import service
-from app.auth.dependencies import SESSION_COOKIE_NAME, get_current_user, set_session_cookie
+from app.auth.dependencies import (
+    SESSION_COOKIE_NAME,
+    get_current_user,
+    set_session_cookie,
+)
 
 router = APIRouter(prefix="/api/auth")
 
@@ -42,6 +46,8 @@ class ProfileUpdate(BaseModel):
 
 @router.post("/signup", status_code=201)
 def signup(body: SignupRequest, response: Response) -> dict:
+    #deactivated until MVP is ready
+    """
     if len(body.password) < 8:
         raise HTTPException(status_code=400, detail="Password must be at least 8 characters")
     if not body.name.strip():
@@ -51,16 +57,22 @@ def signup(body: SignupRequest, response: Response) -> dict:
     except ValueError as e:
         raise HTTPException(status_code=409, detail=str(e))
     set_session_cookie(response, user)
+    """
+    user = {}
     return user
 
 
 @router.post("/login")
 def login(body: LoginRequest, response: Response) -> dict:
+    #deactivated until MVP is ready
+    """
     try:
         user = service.authenticate_user(body.email, body.password)
     except ValueError as e:
         raise HTTPException(status_code=401, detail=str(e))
     set_session_cookie(response, user)
+    """
+    user = {}
     return user
 
 
