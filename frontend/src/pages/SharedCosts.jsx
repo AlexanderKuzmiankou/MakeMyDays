@@ -1,37 +1,686 @@
+import { useEffect, useMemo, useState } from 'react'
 import { motion } from 'framer-motion'
-import { ArrowRight, Receipt, Users } from 'lucide-react'
+import { ArrowRight, ChevronLeft, Plus, Receipt, Repeat, Trash2, UserPlus, Users, X } from 'lucide-react'
 import GlassCard from '../components/GlassCard.jsx'
+import EmptyState from '../components/EmptyState.jsx'
 import PageTransition from '../components/PageTransition.jsx'
 import AvatarCircle from '../components/AvatarCircle.jsx'
+import { api } from '../api.js'
+import { useAuth } from '../auth/AuthContext.jsx'
+import { todayStr } from '../utils.js'
 
-// TODO: replace with real data from GET /api/shared-costs/groups once the backend endpoint exists.
-const MOCK_GROUPS = [
-  { id: 1, name: 'Rome trip weekend', members: 4, total: 612 },
-  { id: 2, name: 'Flatmates · utilities', members: 3, total: 214 },
+const DEFAULT_CURRENCY = 'EUR'
+const CURRENCIES = ['EUR', 'USD', 'GBP', 'CHF', 'PLN', 'CZK', 'SEK', 'NOK', 'DKK', 'HUF', 'RON', 'UAH', 'JPY', 'CAD', 'AUD']
+const FREQUENCIES = [
+  { value: '', label: 'One-off' },
+  { value: 'weekly', label: 'Every week' },
+  { value: 'monthly', label: 'Every month' },
+  { value: 'yearly', label: 'Every year' },
 ]
 
-// TODO: replace with real data from GET /api/shared-costs/balances once the backend endpoint exists.
-const MOCK_BALANCES = [
-  { id: 1, name: 'Josh', amount: 42.5 },
-  { id: 2, name: 'Ovo', amount: -18 },
-  { id: 3, name: 'Jennifer', amount: -24.5 },
-]
+const inputCls =
+  'bg-[var(--surf-2)] border border-[var(--border)] rounded-lg px-3 py-2 text-[14px] outline-none focus:border-accent-400 placeholder:text-[var(--text-3)]'
+const primaryBtnCls =
+  'px-4 py-2 rounded-lg text-[13px] font-medium bg-accent-500 text-white hover:bg-accent-400 transition-all disabled:opacity-40'
+const dashedBtnCls =
+  'w-full py-2.5 rounded-xl border border-dashed border-[var(--border-2)] text-[var(--text-3)] text-[13px] flex items-center justify-center gap-1.5 hover:border-accent-400 hover:text-accent-400 hover:bg-accent-500/5 transition-all'
 
-// TODO: replace with real data from GET /api/shared-costs/expenses once the backend endpoint exists.
-const MOCK_EXPENSES = [
-  { id: 1, label: 'Groceries', paidBy: 'You', amount: 86.4, split: 4, group: 'Rome trip weekend', date: '2026-08-14' },
-  { id: 2, label: 'Electricity bill', paidBy: 'Josh', amount: 96, split: 3, group: 'Flatmates · utilities', date: '2026-08-10' },
-  { id: 3, label: 'Firewood & charcoal', paidBy: 'Alex', amount: 38, split: 4, group: 'Rome trip weekend', date: '2026-08-09' },
-]
-
-function fmtEur(n) {
-  const sign = n < 0 ? '-' : '+'
-  return `${sign}€${Math.abs(n).toFixed(2)}`
+function fmtMoney(amount, currency, { signed = false } = {}) {
+  const abs = new Intl.NumberFormat(undefined, { style: 'currency', currency }).format(Math.abs(amount))
+  if (!signed) return abs
+  return `${amount < 0 ? '-' : '+'}${abs}`
 }
 
+// { EUR: 12, USD: 3 } -> "€12.00 · $3.00"
+function fmtTotals(totals) {
+  const entries = Object.entries(totals).filter(([, v]) => v !== 0)
+  if (entries.length === 0) return fmtMoney(0, DEFAULT_CURRENCY)
+  return entries.map(([c, v]) => fmtMoney(v, c)).join(' · ')
+}
+
+function CurrencySelect({ value, onChange, className = '' }) {
+  const options = CURRENCIES.includes(value) ? CURRENCIES : [value, ...CURRENCIES]
+  return (
+    <select value={value} onChange={(e) => onChange(e.target.value)} className={`${inputCls} ${className}`}>
+      {options.map((c) => (
+        <option key={c} value={c}>{c}</option>
+      ))}
+    </select>
+  )
+}
+
+function SectionLabel({ children, right }) {
+  return (
+    <div className="flex items-center justify-between mb-4">
+      <div className="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-3)]">{children}</div>
+      {right}
+    </div>
+  )
+}
+
+function ErrorLine({ error }) {
+  if (!error) return null
+  return <div className="text-[12px] text-red-400">{error}</div>
+}
+
+// ── overview ─────────────────────────────────────────────────────────────────
+
+function NewGroupForm({ onCreated }) {
+  const [open, setOpen] = useState(false)
+  const [name, setName] = useState('')
+  const [currency, setCurrency] = useState(DEFAULT_CURRENCY)
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState('')
+
+  const submit = async (e) => {
+    e.preventDefault()
+    if (!name.trim()) return
+    setSubmitting(true)
+    setError('')
+    try {
+      const group = await api.sharedCosts.createGroup({ name: name.trim(), currency })
+      setOpen(false)
+      setName('')
+      setCurrency(DEFAULT_CURRENCY)
+      onCreated(group)
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  if (!open) {
+    return (
+      <button onClick={() => setOpen(true)} className={`mt-1 ${dashedBtnCls}`}>
+        <Plus size={14} /> New group
+      </button>
+    )
+  }
+
+  return (
+    <form onSubmit={submit} className="mt-1 flex flex-col gap-2.5 p-4 rounded-xl bg-[var(--surf)] border border-[var(--border)]">
+      <div className="flex flex-wrap gap-2">
+        <input
+          autoFocus
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="Group name…"
+          maxLength={80}
+          className={`flex-1 min-w-[140px] ${inputCls}`}
+        />
+        <CurrencySelect value={currency} onChange={setCurrency} />
+        <button type="submit" disabled={submitting || !name.trim()} className={primaryBtnCls}>Create</button>
+        <button
+          type="button"
+          onClick={() => setOpen(false)}
+          className="w-9 h-9 rounded-lg flex items-center justify-center bg-[var(--surf-2)] border border-[var(--border)] text-[var(--text-2)] hover:text-[var(--text-1)] transition-all"
+        >
+          <X size={14} />
+        </button>
+      </div>
+      <ErrorLine error={error} />
+    </form>
+  )
+}
+
+function Overview({ data, people, onOpenGroup, onGroupCreated }) {
+  // Sum per currency so different currencies are never added together.
+  const owed = {}
+  const owe = {}
+  for (const b of data.balances) {
+    const bucket = b.amount > 0 ? owed : owe
+    bucket[b.currency] = (bucket[b.currency] || 0) + Math.abs(b.amount)
+  }
+
+  const groupName = Object.fromEntries(data.groups.map((g) => [g.group_id, g.name]))
+
+  return (
+    <>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <GlassCard className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-emerald-500/15 flex items-center justify-center shrink-0">
+            <ArrowRight size={18} className="text-emerald-400 -rotate-45" />
+          </div>
+          <div className="min-w-0">
+            <div className="text-[11px] uppercase tracking-wide text-[var(--text-3)]">You're owed</div>
+            <div className="text-[19px] font-bold text-[var(--text-1)] truncate">{fmtTotals(owed)}</div>
+          </div>
+        </GlassCard>
+        <GlassCard className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-red-500/15 flex items-center justify-center shrink-0">
+            <ArrowRight size={18} className="text-red-400 rotate-[135deg]" />
+          </div>
+          <div className="min-w-0">
+            <div className="text-[11px] uppercase tracking-wide text-[var(--text-3)]">You owe</div>
+            <div className="text-[19px] font-bold text-[var(--text-1)] truncate">{fmtTotals(owe)}</div>
+          </div>
+        </GlassCard>
+        <GlassCard className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-accent-500/15 flex items-center justify-center shrink-0">
+            <Users size={18} className="text-accent-400" />
+          </div>
+          <div>
+            <div className="text-[11px] uppercase tracking-wide text-[var(--text-3)]">Active groups</div>
+            <div className="text-[19px] font-bold text-[var(--text-1)]">{data.groups.length}</div>
+          </div>
+        </GlassCard>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <GlassCard>
+          <SectionLabel>Groups</SectionLabel>
+          <div className="flex flex-col gap-3">
+            {data.groups.length === 0 && <EmptyState icon={Users} title="No groups yet — create one to start splitting." />}
+            {data.groups.map((g) => (
+              <button
+                key={g.group_id}
+                onClick={() => onOpenGroup(g.group_id)}
+                className="flex items-center justify-between gap-3 rounded-xl bg-[var(--surf)] border border-[var(--border)] px-3.5 py-3 text-left hover:border-accent-400 transition-all"
+              >
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="w-9 h-9 rounded-lg bg-accent-500/15 flex items-center justify-center shrink-0">
+                    <Users size={15} className="text-accent-400" />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="text-[13.5px] font-medium text-[var(--text-1)] truncate">{g.name}</div>
+                    <div className="text-[11.5px] text-[var(--text-3)]">
+                      {g.members.length} {g.members.length === 1 ? 'person' : 'people'} · {g.currency}
+                    </div>
+                  </div>
+                </div>
+                <div className="text-[13px] font-mono text-[var(--text-2)] shrink-0">
+                  {fmtTotals(g.totals || {})}
+                </div>
+              </button>
+            ))}
+            <NewGroupForm onCreated={onGroupCreated} />
+          </div>
+        </GlassCard>
+
+        <GlassCard>
+          <SectionLabel>Balances</SectionLabel>
+          {data.balances.length === 0 ? (
+            <EmptyState title="All settled up." />
+          ) : (
+            <div className="flex flex-col">
+              {data.balances.map((b) => {
+                const person = people[b.user_id] || { name: 'Unknown' }
+                return (
+                  <div
+                    key={`${b.user_id}-${b.currency}`}
+                    className="flex items-center justify-between py-2.5 border-b border-[var(--border)] last:border-b-0"
+                  >
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <AvatarCircle user={{ name: person.name || person.email }} size={26} />
+                      <span className="text-[13.5px] text-[var(--text-1)] truncate">{person.name || person.email}</span>
+                    </div>
+                    <div className={`text-[13px] font-mono font-medium shrink-0 ${b.amount < 0 ? 'text-red-400' : 'text-emerald-400'}`}>
+                      {fmtMoney(b.amount, b.currency, { signed: true })}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </GlassCard>
+      </div>
+
+      <GlassCard>
+        <SectionLabel>Recent shared expenses</SectionLabel>
+        {data.recent_expenses.length === 0 ? (
+          <EmptyState icon={Receipt} title="No expenses yet." />
+        ) : (
+          <div className="flex flex-col">
+            {data.recent_expenses.map((e) => (
+              <ExpenseRow key={e.expense_id} expense={e} people={people} groupName={groupName[e.group_id]} />
+            ))}
+          </div>
+        )}
+      </GlassCard>
+    </>
+  )
+}
+
+function ExpenseRow({ expense: e, people, groupName, onDelete }) {
+  const payer = people[e.paid_by]
+  return (
+    <div className="group flex items-center justify-between gap-3 py-2.5 border-b border-[var(--border)] last:border-b-0">
+      <div className="min-w-0">
+        <div className="text-[14px] font-medium text-[var(--text-1)] truncate flex items-center gap-1.5">
+          {e.recurring_id && <Repeat size={12} className="text-accent-400 shrink-0" title="Recurring" />}
+          {e.description}
+        </div>
+        <div className="text-[11.5px] text-[var(--text-3)] mt-0.5">
+          {payer?.name || payer?.email || 'Someone'} paid · split {e.split_between.length}{' '}
+          {e.split_between.length === 1 ? 'way' : 'ways'}
+          {groupName ? ` · ${groupName}` : ''} · {e.date}
+        </div>
+      </div>
+      <div className="flex items-center gap-1 shrink-0">
+        <div className="text-[13px] font-mono font-medium text-[var(--text-2)]">{fmtMoney(e.amount, e.currency)}</div>
+        {onDelete && (
+          <button
+            onClick={() => onDelete(e)}
+            className="opacity-0 group-hover:opacity-100 w-7 h-7 rounded-lg flex items-center justify-center text-[var(--text-3)] hover:text-red-400 hover:bg-red-500/10 transition-all"
+            title="Delete expense"
+          >
+            <Trash2 size={14} />
+          </button>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ── group detail ─────────────────────────────────────────────────────────────
+
+function AddMemberForm({ groupId, onAdded }) {
+  const [email, setEmail] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState('')
+
+  const submit = async (e) => {
+    e.preventDefault()
+    if (!email.trim()) return
+    setSubmitting(true)
+    setError('')
+    try {
+      onAdded(await api.sharedCosts.addMember(groupId, email.trim()))
+      setEmail('')
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <form onSubmit={submit} className="mt-3 flex flex-col gap-2">
+      <div className="flex gap-2">
+        <input
+          type="email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          placeholder="Add by email…"
+          className={`flex-1 min-w-0 ${inputCls}`}
+        />
+        <button type="submit" disabled={submitting || !email.trim()} className={`${primaryBtnCls} flex items-center gap-1.5`}>
+          <UserPlus size={14} /> Add
+        </button>
+      </div>
+      <ErrorLine error={error} />
+    </form>
+  )
+}
+
+function ExpenseForm({ group, currentUserId, onSaved }) {
+  const memberIds = group.members.map((m) => m.user_id)
+  const blank = () => ({
+    description: '',
+    amount: '',
+    currency: group.currency,
+    paidBy: currentUserId,
+    split: memberIds,
+    date: todayStr(),
+    frequency: '',
+    endDate: '',
+  })
+  const [open, setOpen] = useState(false)
+  const [form, setForm] = useState(blank)
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState('')
+  const set = (patch) => setForm((f) => ({ ...f, ...patch }))
+
+  const toggleSplit = (uid) =>
+    set({ split: form.split.includes(uid) ? form.split.filter((id) => id !== uid) : [...form.split, uid] })
+
+  const submit = async (e) => {
+    e.preventDefault()
+    const amount = parseFloat(form.amount)
+    if (!form.description.trim() || !(amount > 0) || form.split.length === 0) return
+    setSubmitting(true)
+    setError('')
+    const common = {
+      description: form.description.trim(),
+      amount,
+      currency: form.currency,
+      paid_by: form.paidBy,
+      split_between: form.split,
+    }
+    try {
+      if (form.frequency) {
+        await api.sharedCosts.createRecurring(group.group_id, {
+          ...common,
+          frequency: form.frequency,
+          start_date: form.date,
+          end_date: form.endDate || null,
+        })
+      } else {
+        await api.sharedCosts.createExpense(group.group_id, { ...common, date: form.date })
+      }
+      setForm(blank())
+      setOpen(false)
+      onSaved()
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  if (!open) {
+    return (
+      <button
+        onClick={() => {
+          setForm(blank())
+          setOpen(true)
+        }}
+        className={dashedBtnCls}
+      >
+        <Receipt size={14} /> Add expense
+      </button>
+    )
+  }
+
+  return (
+    <form onSubmit={submit} className="flex flex-col gap-3 p-4 rounded-xl bg-[var(--surf)] border border-[var(--border)]">
+      <input
+        autoFocus
+        value={form.description}
+        onChange={(e) => set({ description: e.target.value })}
+        placeholder="What was it for?"
+        maxLength={120}
+        className={inputCls}
+      />
+      <div className="flex flex-wrap gap-2">
+        <input
+          type="number" min={0.01} step={0.01}
+          value={form.amount}
+          onChange={(e) => set({ amount: e.target.value })}
+          placeholder="Amount"
+          className={`w-32 ${inputCls}`}
+        />
+        <CurrencySelect value={form.currency} onChange={(currency) => set({ currency })} />
+        <select value={form.paidBy} onChange={(e) => set({ paidBy: e.target.value })} className={`flex-1 min-w-[140px] ${inputCls}`}>
+          {group.members.map((m) => (
+            <option key={m.user_id} value={m.user_id}>
+              Paid by {m.user_id === currentUserId ? 'you' : m.name || m.email}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div>
+        <div className="text-[11.5px] text-[var(--text-3)] mb-1.5">Split equally between</div>
+        <div className="flex flex-wrap gap-1.5">
+          {group.members.map((m) => {
+            const on = form.split.includes(m.user_id)
+            return (
+              <button
+                type="button"
+                key={m.user_id}
+                onClick={() => toggleSplit(m.user_id)}
+                className={`px-2.5 py-1 rounded-full text-[12px] border transition-all ${
+                  on
+                    ? 'bg-accent-500/15 border-accent-400 text-accent-400'
+                    : 'border-[var(--border)] text-[var(--text-3)] hover:text-[var(--text-2)]'
+                }`}
+              >
+                {m.user_id === currentUserId ? 'You' : m.name || m.email}
+              </button>
+            )
+          })}
+        </div>
+      </div>
+
+      <div className="flex flex-wrap gap-2 items-center">
+        <select value={form.frequency} onChange={(e) => set({ frequency: e.target.value })} className={inputCls}>
+          {FREQUENCIES.map((f) => (
+            <option key={f.value} value={f.value}>{f.label}</option>
+          ))}
+        </select>
+        <label className="flex items-center gap-1.5 text-[12px] text-[var(--text-3)]">
+          {form.frequency ? 'Starts' : 'Date'}
+          <input type="date" value={form.date} onChange={(e) => set({ date: e.target.value })} required className={inputCls} />
+        </label>
+        {form.frequency && (
+          <label className="flex items-center gap-1.5 text-[12px] text-[var(--text-3)]">
+            Ends
+            <input
+              type="date"
+              value={form.endDate}
+              min={form.date}
+              onChange={(e) => set({ endDate: e.target.value })}
+              className={inputCls}
+            />
+          </label>
+        )}
+      </div>
+
+      <ErrorLine error={error} />
+      <div className="flex gap-2 justify-end">
+        <button
+          type="button"
+          onClick={() => setOpen(false)}
+          className="px-4 py-2 rounded-lg text-[13px] bg-[var(--surf-2)] border border-[var(--border)] text-[var(--text-2)] hover:text-[var(--text-1)] transition-all"
+        >
+          Cancel
+        </button>
+        <button
+          type="submit"
+          disabled={submitting || !form.description.trim() || !(parseFloat(form.amount) > 0) || form.split.length === 0}
+          className={primaryBtnCls}
+        >
+          {form.frequency ? 'Add recurring expense' : 'Add expense'}
+        </button>
+      </div>
+    </form>
+  )
+}
+
+function GroupDetail({ group, currentUserId, onBack, onGroupChanged }) {
+  const [expenses, setExpenses] = useState(null)
+  const [recurring, setRecurring] = useState([])
+  const [balances, setBalances] = useState(null)
+  const [error, setError] = useState('')
+
+  const people = useMemo(() => Object.fromEntries(group.members.map((m) => [m.user_id, m])), [group.members])
+  const nameOf = (uid) => (uid === currentUserId ? 'You' : people[uid]?.name || people[uid]?.email || 'Unknown')
+
+  const load = () => {
+    const id = group.group_id
+    // Expenses first: reading them materializes due recurring occurrences.
+    return api.sharedCosts
+      .expenses(id)
+      .then(async (exp) => {
+        const [rec, bal] = await Promise.all([api.sharedCosts.recurring(id), api.sharedCosts.balances(id)])
+        setExpenses(exp)
+        setRecurring(rec)
+        setBalances(bal)
+      })
+      .catch((err) => setError(err.message))
+  }
+
+  useEffect(() => {
+    load()
+  }, [group.group_id])
+
+  const changeCurrency = async (currency) => {
+    try {
+      onGroupChanged(await api.sharedCosts.updateGroup(group.group_id, { currency }))
+    } catch (err) {
+      setError(err.message)
+    }
+  }
+
+  const removeExpense = async (expense) => {
+    if (!window.confirm(`Delete "${expense.description}"?`)) return
+    setExpenses((prev) => prev.filter((e) => e.expense_id !== expense.expense_id))
+    try {
+      await api.sharedCosts.removeExpense(group.group_id, expense.expense_id)
+    } finally {
+      load()
+    }
+  }
+
+  const stopRecurring = async (r) => {
+    if (!window.confirm(`Stop "${r.description}"? Expenses already added are kept.`)) return
+    try {
+      await api.sharedCosts.removeRecurring(group.group_id, r.recurring_id)
+    } finally {
+      load()
+    }
+  }
+
+  return (
+    <>
+      <GlassCard>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <button onClick={onBack} className="flex items-center gap-1 text-[13px] text-[var(--text-3)] hover:text-[var(--text-1)]">
+            <ChevronLeft size={15} /> All groups
+          </button>
+          <label className="flex items-center gap-2 text-[12px] text-[var(--text-3)]">
+            Default currency
+            <CurrencySelect value={group.currency} onChange={changeCurrency} />
+          </label>
+        </div>
+        <h2 className="text-[20px] font-semibold font-serif mt-3">{group.name}</h2>
+        <ErrorLine error={error} />
+      </GlassCard>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <GlassCard>
+          <SectionLabel>Members</SectionLabel>
+          <div className="flex flex-col">
+            {group.members.map((m) => (
+              <div key={m.user_id} className="flex items-center gap-2.5 py-2 border-b border-[var(--border)] last:border-b-0">
+                <AvatarCircle user={{ name: m.name || m.email }} size={26} />
+                <div className="min-w-0">
+                  <div className="text-[13.5px] text-[var(--text-1)] truncate">
+                    {m.name || m.email}
+                    {m.user_id === currentUserId && <span className="text-[var(--text-3)]"> (you)</span>}
+                  </div>
+                  <div className="text-[11.5px] text-[var(--text-3)] truncate">{m.email}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+          <AddMemberForm groupId={group.group_id} onAdded={onGroupChanged} />
+        </GlassCard>
+
+        <GlassCard>
+          <SectionLabel>Settle up</SectionLabel>
+          {balances === null ? (
+            <div className="skeleton-line" style={{ width: '70%' }} />
+          ) : balances.currencies.every((c) => c.settlements.length === 0) ? (
+            <EmptyState title="All settled up." />
+          ) : (
+            <div className="flex flex-col">
+              {balances.currencies.flatMap((c) =>
+                c.settlements.map((s) => (
+                  <div
+                    key={`${c.currency}-${s.from}-${s.to}`}
+                    className="flex items-center justify-between py-2.5 border-b border-[var(--border)] last:border-b-0"
+                  >
+                    <div className="text-[13.5px] text-[var(--text-1)] truncate">
+                      {nameOf(s.from)} <ArrowRight size={12} className="inline text-[var(--text-3)]" /> {nameOf(s.to)}
+                    </div>
+                    <div
+                      className={`text-[13px] font-mono font-medium shrink-0 ${
+                        s.from === currentUserId ? 'text-red-400' : s.to === currentUserId ? 'text-emerald-400' : 'text-[var(--text-2)]'
+                      }`}
+                    >
+                      {fmtMoney(s.amount, c.currency)}
+                    </div>
+                  </div>
+                )),
+              )}
+            </div>
+          )}
+        </GlassCard>
+      </div>
+
+      {recurring.length > 0 && (
+        <GlassCard>
+          <SectionLabel>Recurring</SectionLabel>
+          <div className="flex flex-col">
+            {recurring.map((r) => (
+              <div key={r.recurring_id} className="group flex items-center justify-between gap-3 py-2.5 border-b border-[var(--border)] last:border-b-0">
+                <div className="min-w-0">
+                  <div className="text-[14px] font-medium text-[var(--text-1)] truncate flex items-center gap-1.5">
+                    <Repeat size={12} className="text-accent-400 shrink-0" /> {r.description}
+                  </div>
+                  <div className="text-[11.5px] text-[var(--text-3)] mt-0.5">
+                    {FREQUENCIES.find((f) => f.value === r.frequency)?.label} · {nameOf(r.paid_by)} pays ·{' '}
+                    {r.next_due ? `next ${r.next_due}` : 'ended'}
+                    {r.end_date ? ` · until ${r.end_date}` : ''}
+                  </div>
+                </div>
+                <div className="flex items-center gap-1 shrink-0">
+                  <div className="text-[13px] font-mono font-medium text-[var(--text-2)]">{fmtMoney(r.amount, r.currency)}</div>
+                  <button
+                    onClick={() => stopRecurring(r)}
+                    className="opacity-0 group-hover:opacity-100 w-7 h-7 rounded-lg flex items-center justify-center text-[var(--text-3)] hover:text-red-400 hover:bg-red-500/10 transition-all"
+                    title="Stop recurring"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </GlassCard>
+      )}
+
+      <GlassCard>
+        <SectionLabel>Expenses</SectionLabel>
+        <div className="mb-4">
+          <ExpenseForm group={group} currentUserId={currentUserId} onSaved={load} />
+        </div>
+        {expenses === null ? (
+          <div className="flex flex-col gap-3 py-2">
+            {[1, 2, 3].map((i) => <div key={i} className="skeleton-line" style={{ width: `${60 + i * 10}%` }} />)}
+          </div>
+        ) : expenses.length === 0 ? (
+          <EmptyState icon={Receipt} title="No expenses in this group yet." />
+        ) : (
+          <div className="flex flex-col">
+            {expenses.map((e) => (
+              <ExpenseRow key={e.expense_id} expense={e} people={people} onDelete={removeExpense} />
+            ))}
+          </div>
+        )}
+      </GlassCard>
+    </>
+  )
+}
+
+// ── page ─────────────────────────────────────────────────────────────────────
+
 export default function SharedCosts() {
-  const youAreOwed = MOCK_BALANCES.filter((b) => b.amount > 0).reduce((s, b) => s + b.amount, 0)
-  const youOwe = MOCK_BALANCES.filter((b) => b.amount < 0).reduce((s, b) => s + Math.abs(b.amount), 0)
+  const { user } = useAuth()
+  const [data, setData] = useState(null)
+  const [error, setError] = useState(false)
+  const [openGroupId, setOpenGroupId] = useState(null)
+
+  const load = () => api.sharedCosts.overview().then(setData).catch(() => setError(true))
+
+  useEffect(() => {
+    load()
+  }, [])
+
+  // Everyone the current user shares a group with, for resolving user ids to names.
+  const people = useMemo(() => {
+    const map = {}
+    for (const g of data?.groups || []) for (const m of g.members) map[m.user_id] = m
+    return map
+  }, [data])
+
+  const openGroup = data?.groups.find((g) => g.group_id === openGroupId)
+
+  const replaceGroup = (group) =>
+    setData((d) => ({ ...d, groups: d.groups.map((g) => (g.group_id === group.group_id ? { ...g, ...group } : g)) }))
 
   return (
     <PageTransition>
@@ -42,121 +691,41 @@ export default function SharedCosts() {
         transition={{ duration: 0.35 }}
       >
         <h1 className="text-[26px] md:text-[28px] font-semibold tracking-normal font-serif mb-1.5">Shared Costs</h1>
-        <p className="text-[14px] text-[var(--text-2)]">
-          Split group expenses and settle up automatically — skeleton page — mock data until the shared costs API ships
-        </p>
+        <p className="text-[14px] text-[var(--text-2)]">Split group expenses and settle up automatically</p>
       </motion.section>
 
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <GlassCard className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-emerald-500/15 flex items-center justify-center shrink-0">
-            <ArrowRight size={18} className="text-emerald-400 -rotate-45" />
-          </div>
-          <div>
-            <div className="text-[11px] uppercase tracking-wide text-[var(--text-3)]">You're owed</div>
-            <div className="text-[19px] font-bold text-[var(--text-1)]">€{youAreOwed.toFixed(2)}</div>
-          </div>
-        </GlassCard>
-        <GlassCard className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-red-500/15 flex items-center justify-center shrink-0">
-            <ArrowRight size={18} className="text-red-400 rotate-[135deg]" />
-          </div>
-          <div>
-            <div className="text-[11px] uppercase tracking-wide text-[var(--text-3)]">You owe</div>
-            <div className="text-[19px] font-bold text-[var(--text-1)]">€{youOwe.toFixed(2)}</div>
-          </div>
-        </GlassCard>
-        <GlassCard className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-accent-500/15 flex items-center justify-center shrink-0">
-            <Users size={18} className="text-accent-400" />
-          </div>
-          <div>
-            <div className="text-[11px] uppercase tracking-wide text-[var(--text-3)]">Active groups</div>
-            <div className="text-[19px] font-bold text-[var(--text-1)]">{MOCK_GROUPS.length}</div>
-          </div>
-        </GlassCard>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      {data === null && !error ? (
         <GlassCard>
-          <div className="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-3)] mb-4">
-            Groups
-          </div>
-          <div className="flex flex-col gap-3">
-            {MOCK_GROUPS.map((g) => (
-              <div
-                key={g.id}
-                className="flex items-center justify-between gap-3 rounded-xl bg-[var(--surf)] border border-[var(--border)] px-3.5 py-3"
-              >
-                <div className="flex items-center gap-3 min-w-0">
-                  <div className="w-9 h-9 rounded-lg bg-accent-500/15 flex items-center justify-center shrink-0">
-                    <Users size={15} className="text-accent-400" />
-                  </div>
-                  <div className="min-w-0">
-                    <div className="text-[13.5px] font-medium text-[var(--text-1)] truncate">{g.name}</div>
-                    <div className="text-[11.5px] text-[var(--text-3)]">{g.members} people</div>
-                  </div>
-                </div>
-                <div className="text-[13px] font-mono text-[var(--text-2)] shrink-0">€{g.total.toFixed(2)}</div>
-              </div>
-            ))}
-            <button
-              disabled
-              className="mt-1 w-full py-2.5 rounded-lg text-[13px] font-medium border border-dashed border-[var(--border-2)] text-[var(--text-3)] cursor-not-allowed"
-              title="Coming soon"
-            >
-              + New group
-            </button>
+          <div className="flex flex-col gap-3 py-2">
+            {[1, 2, 3].map((i) => <div key={i} className="skeleton-line" style={{ width: `${60 + i * 10}%` }} />)}
           </div>
         </GlassCard>
-
+      ) : error ? (
         <GlassCard>
-          <div className="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-3)] mb-4">
-            Balances
-          </div>
-          <div className="flex flex-col">
-            {MOCK_BALANCES.map((b) => (
-              <div key={b.id} className="flex items-center justify-between py-2.5 border-b border-[var(--border)] last:border-b-0">
-                <div className="flex items-center gap-2.5 min-w-0">
-                  <AvatarCircle user={{ name: b.name }} size={26} />
-                  <span className="text-[13.5px] text-[var(--text-1)] truncate">{b.name}</span>
-                </div>
-                <div className={`text-[13px] font-mono font-medium shrink-0 ${b.amount < 0 ? 'text-red-400' : 'text-emerald-400'}`}>
-                  {fmtEur(b.amount)}
-                </div>
-              </div>
-            ))}
-          </div>
+          <EmptyState title="Could not load shared costs." subtitle="Backend may be offline." />
         </GlassCard>
-      </div>
-
-      <GlassCard>
-        <div className="flex items-center justify-between mb-4">
-          <div className="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-3)]">
-            Recent shared expenses
-          </div>
-          <button
-            disabled
-            className="flex items-center gap-1.5 text-[12px] text-[var(--text-3)] cursor-not-allowed"
-            title="Coming soon"
-          >
-            <Receipt size={13} /> Add expense
-          </button>
-        </div>
-        <div className="flex flex-col">
-          {MOCK_EXPENSES.map((e) => (
-            <div key={e.id} className="flex items-center justify-between py-2.5 border-b border-[var(--border)] last:border-b-0">
-              <div>
-                <div className="text-[14px] font-medium text-[var(--text-1)]">{e.label}</div>
-                <div className="text-[11.5px] text-[var(--text-3)] mt-0.5">
-                  {e.paidBy} paid · split {e.split} ways · {e.group} · {e.date}
-                </div>
-              </div>
-              <div className="text-[13px] font-mono font-medium text-[var(--text-2)]">€{e.amount.toFixed(2)}</div>
-            </div>
-          ))}
-        </div>
-      </GlassCard>
+      ) : openGroup ? (
+        <GroupDetail
+          key={openGroup.group_id}
+          group={openGroup}
+          currentUserId={user?.user_id}
+          onBack={() => {
+            setOpenGroupId(null)
+            load()
+          }}
+          onGroupChanged={replaceGroup}
+        />
+      ) : (
+        <Overview
+          data={data}
+          people={people}
+          onOpenGroup={setOpenGroupId}
+          onGroupCreated={(group) => {
+            setData((d) => ({ ...d, groups: [...d.groups, { ...group, totals: {} }] }))
+            setOpenGroupId(group.group_id)
+          }}
+        />
+      )}
     </PageTransition>
   )
 }
