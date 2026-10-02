@@ -221,6 +221,48 @@ def delete_expense(user_id: str, group_id: str, expense_id: str) -> None:
     _expenses().delete_item(Key={"expense_id": expense_id})
 
 
+def update_expense(
+    user_id: str,
+    group_id: str,
+    expense_id: str,
+    description: str | None = None,
+    amount: float | None = None,
+    currency: str | None = None,
+    paid_by: str | None = None,
+    split_between: list[str] | None = None,
+    expense_date: str | None = None,
+) -> dict:
+    """Edit any field; fields left as None keep their current value.
+
+    Editing an occurrence of a recurring expense changes only that occurrence.
+    """
+    group = _get_group_for_member(user_id, group_id)
+    item = _expenses().get_item(Key={"expense_id": expense_id}).get("Item")
+    if not item or item.get("group_id") != group_id:
+        raise ValueError(f"Expense {expense_id} not found")
+
+    paid_by = paid_by or item["paid_by"]
+    split_between = list(dict.fromkeys(split_between)) if split_between else list(item["split_between"])
+    _validate_participants(group, paid_by, split_between)
+
+    record = _expense_record(
+        expense_id=expense_id,
+        group_id=group_id,
+        description=description if description is not None else item.get("description", ""),
+        amount=amount if amount is not None else item["amount"],
+        currency=currency or item.get("currency", DEFAULT_CURRENCY),
+        paid_by=paid_by,
+        split_between=split_between,
+        expense_date=expense_date or item.get("date", date.today().isoformat()),
+        created_by=item.get("created_by", user_id),
+        recurring_id=item.get("recurring_id"),
+    )
+    record["created_at"] = item.get("created_at", record["created_at"])
+    record["updated_by"] = user_id
+    _expenses().put_item(Item=record)
+    return _serialize_expense(record)
+
+
 def _expense_record(
     expense_id: str,
     group_id: str,

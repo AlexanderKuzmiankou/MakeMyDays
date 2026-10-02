@@ -70,6 +70,19 @@ class ExpenseCreate(BaseModel):
     _date = field_validator("date")(_validate_date)
 
 
+class ExpenseUpdate(BaseModel):
+    description: str | None = Field(default=None, max_length=120)
+    amount: float | None = Field(default=None, gt=0, le=1_000_000)
+    currency: str | None = None
+    paid_by: str | None = None
+    split_between: list[str] | None = None
+    date: str | None = None
+
+    _description = field_validator("description")(_validate_name)
+    _currency = field_validator("currency")(_validate_currency)
+    _date = field_validator("date")(_validate_date)
+
+
 class RecurringCreate(BaseModel):
     description: str = Field(max_length=120)
     amount: float = Field(gt=0, le=1_000_000)
@@ -138,6 +151,24 @@ def post_expense(group_id: str, body: ExpenseCreate, user: dict = Depends(get_cu
         group_id,
         body.description,
         body.amount,
+        currency=body.currency,
+        paid_by=body.paid_by,
+        split_between=body.split_between,
+        expense_date=body.date,
+    )
+
+
+@router.patch("/groups/{group_id}/expenses/{expense_id}")
+def patch_expense(
+    group_id: str, expense_id: str, body: ExpenseUpdate, user: dict = Depends(get_current_user)
+) -> dict:
+    return _call(
+        service.update_expense,
+        user["user_id"],
+        group_id,
+        expense_id,
+        description=body.description,
+        amount=body.amount,
         currency=body.currency,
         paid_by=body.paid_by,
         split_between=body.split_between,
