@@ -8,6 +8,7 @@ from prometheus_fastapi_instrumentator import Instrumentator
 from app.auth.router import router as auth_router
 from app.briefing.router import router as briefing_router
 from app.habits.router import router as habits_router
+from app.shared_costs.router import router as shared_costs_router
 from app.shopping.router import router as shopping_router
 
 app = FastAPI()
@@ -17,6 +18,7 @@ Instrumentator().instrument(app).expose(app)
 app.include_router(auth_router)
 app.include_router(briefing_router)
 app.include_router(habits_router)
+app.include_router(shared_costs_router)
 app.include_router(shopping_router)
 
 FRONTEND_DIST = Path(__file__).resolve().parent.parent / "frontend" / "dist"
