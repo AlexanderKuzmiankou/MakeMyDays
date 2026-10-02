@@ -157,6 +157,9 @@ next request -> read cookie -> verify HMAC signature -> check exp
 | `makemydays-users` | `email` | `user_id`, `name`, `password_hash`, `avatar_url`, `created_at` | `get_item` by email |
 | `makemydays-habits` | `habit_id` | `user_id`, `name`, `emoji`, `goal_streak`, `completions` (string set) | `scan` filtered by `user_id` |
 | `makemydays-shopping` | `item_id` | `user_id`, `name`, `description`, `url`, `price_min/max`, `purchased` | `scan` filtered by `user_id` |
+| `makemydays-shared-groups` | `group_id` | `name`, `currency` (ISO code, default `EUR`), `member_ids` (string set), `members` (map user_id -> name/email), `created_by` | `scan` with `contains(member_ids, user_id)` |
+| `makemydays-shared-expenses` | `expense_id` | `group_id`, `description`, `amount`, `currency`, `paid_by`, `split_between` (list), `date`, `recurring_id` (if generated) | `scan` filtered by `group_id` |
+| `makemydays-shared-recurring` | `recurring_id` | `group_id`, `description`, `amount`, `currency`, `paid_by`, `split_between`, `frequency` (weekly/monthly/yearly), `start_date`, `end_date`, `occurrences` | `scan` filtered by `group_id` |
 
 DynamoDB gotchas already hit in this codebase:
 
@@ -165,6 +168,8 @@ DynamoDB gotchas already hit in this codebase:
 - **`scan` + `FilterExpression` reads the whole table** and filters afterwards. Fine at personal scale, but you pay for every item. The scalable fix is a GSI on `user_id` and `query`.
 - **Ownership check:** every get/toggle/delete compares `item["user_id"]` to the logged-in user before acting. Keep doing this; the key alone isn't authorization.
 - boto3 resource is created lazily (`_table()`), which keeps imports cheap and tests mockable.
+- **Shared-costs authorization is membership, not ownership:** every group endpoint checks the caller is in `member_ids`, and expenses are checked against the group in the URL.
+- **Recurring expenses have no scheduler.** Due occurrences are generated when a group's expenses/balances are read, with deterministic ids (`<recurring_id>#<n>`) and a conditional put so they are never double-booked.
 
 ---
 
