@@ -386,3 +386,69 @@ def test_delete_recurring_keeps_generated_expenses(tables, as_user):
     assert tables["recurring"].items == {}
     assert len(tables["expenses"].items) == generated
     assert client.get(f"/api/shared-costs/groups/{gid}/recurring").json() == []
+
+
+# ── editing expenses ─────────────────────────────────────────────────────────
+
+def test_update_expense_changes_given_fields_only(tables, as_user):
+    group = _group_with(ALICE, BOB)
+    gid = group["group_id"]
+    expense = service.create_expense("alice", gid, "Dinner", 40, expense_date="2026-05-01")
+
+    res = client.patch(f"/api/shared-costs/groups/{gid}/expenses/{expense['expense_id']}",
+                       json={"amount": 55.5, "paid_by": "bob", "split_between": ["alice"]})
+    assert res.status_code == 200
+    data = res.json()
+    assert (data["description"], data["amount"], data["paid_by"], data["split_between"], data["date"]) == (
+        "Dinner", 55.5, "bob", ["alice"], "2026-05-01",
+    )
+    stored = tables["expenses"].items[expense["expense_id"]]
+    assert stored["amount"] == Decimal("55.50")
+    assert stored["created_by"] == "alice"
+
+
+def test_update_expense_by_another_member(tables, as_user):
+    group = _group_with(ALICE, BOB)
+    gid = group["group_id"]
+    expense = service.create_expense("alice", gid, "Dinner", 40)
+    as_user(BOB)
+    res = client.patch(f"/api/shared-costs/groups/{gid}/expenses/{expense['expense_id']}", json={"description": "Lunch"})
+    assert res.status_code == 200
+    assert tables["expenses"].items[expense["expense_id"]]["updated_by"] == "bob"
+
+
+def test_update_expense_validates_participants(tables, as_user):
+    group = _group_with(ALICE)
+    gid = group["group_id"]
+    expense = service.create_expense("alice", gid, "x", 5)
+    res = client.patch(f"/api/shared-costs/groups/{gid}/expenses/{expense['expense_id']}", json={"paid_by": "carol"})
+    assert res.status_code == 400
+
+
+def test_update_expense_rejects_invalid_amount(tables, as_user):
+    group = _group_with(ALICE)
+    gid = group["group_id"]
+    expense = service.create_expense("alice", gid, "x", 5)
+    res = client.patch(f"/api/shared-costs/groups/{gid}/expenses/{expense['expense_id']}", json={"amount": 0})
+    assert res.status_code == 422
+
+
+def test_cannot_update_expense_through_another_group(tables, as_user):
+    g1 = _group_with(ALICE)
+    g2 = _group_with(ALICE)
+    expense = service.create_expense("alice", g1["group_id"], "x", 5)
+    res = client.patch(f"/api/shared-costs/groups/{g2['group_id']}/expenses/{expense['expense_id']}", json={"amount": 9})
+    assert res.status_code == 404
+
+
+def test_edited_recurring_occurrence_survives_materialization(tables, as_user):
+    group = _group_with(ALICE)
+    gid = group["group_id"]
+    recurring = service.create_recurring("alice", gid, "Rent", 500, "monthly", "2026-01-01")
+    first_id = f"{recurring['recurring_id']}#0"
+
+    res = client.patch(f"/api/shared-costs/groups/{gid}/expenses/{first_id.replace('#', '%23')}", json={"amount": 450})
+    assert res.status_code == 200
+    service.materialize_recurring(gid)
+    assert tables["expenses"].items[first_id]["amount"] == Decimal("450.00")
+    assert tables["expenses"].items[first_id]["recurring_id"] == recurring["recurring_id"]
