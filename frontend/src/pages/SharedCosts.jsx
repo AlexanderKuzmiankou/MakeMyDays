@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { motion } from 'framer-motion'
-import { ArrowRight, ChevronLeft, Plus, Receipt, Repeat, Trash2, UserPlus, Users, X } from 'lucide-react'
+import { ArrowRight, ChevronLeft, Pencil, Plus, Receipt, Repeat, Trash2, UserPlus, Users, X } from 'lucide-react'
 import GlassCard from '../components/GlassCard.jsx'
 import EmptyState from '../components/EmptyState.jsx'
 import PageTransition from '../components/PageTransition.jsx'
@@ -24,6 +24,9 @@ const primaryBtnCls =
   'px-4 py-2 rounded-lg text-[13px] font-medium bg-accent-500 text-white hover:bg-accent-400 transition-all disabled:opacity-40'
 const dashedBtnCls =
   'w-full py-2.5 rounded-xl border border-dashed border-[var(--border-2)] text-[var(--text-3)] text-[13px] flex items-center justify-center gap-1.5 hover:border-accent-400 hover:text-accent-400 hover:bg-accent-500/5 transition-all'
+// Row actions appear on hover with a mouse, but stay visible on touch screens.
+const rowActionCls =
+  'sm:opacity-0 sm:group-hover:opacity-100 focus:opacity-100 w-7 h-7 rounded-lg flex items-center justify-center text-[var(--text-3)] transition-all'
 
 function fmtMoney(amount, currency, { signed = false } = {}) {
   const abs = new Intl.NumberFormat(undefined, { style: 'currency', currency }).format(Math.abs(amount))
@@ -36,6 +39,18 @@ function fmtTotals(totals) {
   const entries = Object.entries(totals).filter(([, v]) => v !== 0)
   if (entries.length === 0) return fmtMoney(0, DEFAULT_CURRENCY)
   return entries.map(([c, v]) => fmtMoney(v, c)).join(' · ')
+}
+
+// What an expense means for one user: positive = they get money back,
+// negative = they owe. Mirrors service.split_amount — equal split to the cent,
+// leftover cents go to the first participants.
+function netForUser(expense, userId) {
+  const cents = Math.round(expense.amount * 100)
+  const n = expense.split_between.length
+  const idx = expense.split_between.indexOf(userId)
+  const shareCents = idx === -1 ? 0 : Math.floor(cents / n) + (idx < cents % n ? 1 : 0)
+  const paidCents = expense.paid_by === userId ? cents : 0
+  return (paidCents - shareCents) / 100
 }
 
 function CurrencySelect({ value, onChange, className = '' }) {
@@ -61,6 +76,64 @@ function SectionLabel({ children, right }) {
 function ErrorLine({ error }) {
   if (!error) return null
   return <div className="text-[12px] text-red-400">{error}</div>
+}
+
+function StatChip({ tone, label, value }) {
+  const tones = {
+    good: 'bg-emerald-500/10 text-emerald-400',
+    bad: 'bg-red-500/10 text-red-400',
+    neutral: 'bg-[var(--surf-2)] text-[var(--text-2)]',
+  }
+  return (
+    <div className={`flex items-baseline gap-1.5 rounded-lg px-2.5 py-1.5 ${tones[tone]}`}>
+      <span className="text-[11px] uppercase tracking-wide opacity-80">{label}</span>
+      <span className="text-[13.5px] font-semibold font-mono">{value}</span>
+    </div>
+  )
+}
+
+// Compact page header shared by the overview and a group. In a group it acts
+// as a breadcrumb ("Shared Costs › Group") with the way back on the left.
+function PageHeader({ group, onBack, chips, actions }) {
+  return (
+    <motion.section
+      className="glass rounded-2xl px-5 py-4"
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.3 }}
+    >
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-3">
+        {group ? (
+          <div className="flex items-center gap-3 min-w-0 flex-1">
+            <button
+              onClick={onBack}
+              title="Back to all groups"
+              className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0 bg-[var(--surf-2)] border border-[var(--border)] text-[var(--text-2)] hover:text-accent-400 hover:border-accent-400 transition-all"
+            >
+              <ChevronLeft size={18} />
+            </button>
+            <div className="min-w-0">
+              <button
+                onClick={onBack}
+                className="text-[11.5px] text-[var(--text-3)] hover:text-accent-400 transition-colors"
+              >
+                Shared Costs
+              </button>
+              <span className="text-[11.5px] text-[var(--text-3)]"> › {group.members.length} {group.members.length === 1 ? 'member' : 'members'}</span>
+              <h1 className="text-[20px] leading-tight font-semibold font-serif truncate">{group.name}</h1>
+            </div>
+          </div>
+        ) : (
+          <div className="min-w-0 flex-1">
+            <h1 className="text-[20px] leading-tight font-semibold font-serif">Shared Costs</h1>
+            <div className="text-[12px] text-[var(--text-3)]">Split group expenses and settle up</div>
+          </div>
+        )}
+        {chips && <div className="flex flex-wrap gap-2">{chips}</div>}
+        {actions}
+      </div>
+    </motion.section>
+  )
 }
 
 // ── overview ─────────────────────────────────────────────────────────────────
@@ -124,7 +197,7 @@ function NewGroupForm({ onCreated }) {
   )
 }
 
-function Overview({ data, people, onOpenGroup, onGroupCreated }) {
+function Overview({ data, people, currentUserId, onOpenGroup, onGroupCreated }) {
   // Sum per currency so different currencies are never added together.
   const owed = {}
   const owe = {}
@@ -137,35 +210,15 @@ function Overview({ data, people, onOpenGroup, onGroupCreated }) {
 
   return (
     <>
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <GlassCard className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-emerald-500/15 flex items-center justify-center shrink-0">
-            <ArrowRight size={18} className="text-emerald-400 -rotate-45" />
-          </div>
-          <div className="min-w-0">
-            <div className="text-[11px] uppercase tracking-wide text-[var(--text-3)]">You're owed</div>
-            <div className="text-[19px] font-bold text-[var(--text-1)] truncate">{fmtTotals(owed)}</div>
-          </div>
-        </GlassCard>
-        <GlassCard className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-red-500/15 flex items-center justify-center shrink-0">
-            <ArrowRight size={18} className="text-red-400 rotate-[135deg]" />
-          </div>
-          <div className="min-w-0">
-            <div className="text-[11px] uppercase tracking-wide text-[var(--text-3)]">You owe</div>
-            <div className="text-[19px] font-bold text-[var(--text-1)] truncate">{fmtTotals(owe)}</div>
-          </div>
-        </GlassCard>
-        <GlassCard className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-accent-500/15 flex items-center justify-center shrink-0">
-            <Users size={18} className="text-accent-400" />
-          </div>
-          <div>
-            <div className="text-[11px] uppercase tracking-wide text-[var(--text-3)]">Active groups</div>
-            <div className="text-[19px] font-bold text-[var(--text-1)]">{data.groups.length}</div>
-          </div>
-        </GlassCard>
-      </div>
+      <PageHeader
+        chips={
+          <>
+            <StatChip tone={Object.keys(owed).length ? 'good' : 'neutral'} label="You're owed" value={fmtTotals(owed)} />
+            <StatChip tone={Object.keys(owe).length ? 'bad' : 'neutral'} label="You owe" value={fmtTotals(owe)} />
+            <StatChip tone="neutral" label="Groups" value={data.groups.length} />
+          </>
+        }
+      />
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <GlassCard>
@@ -233,7 +286,13 @@ function Overview({ data, people, onOpenGroup, onGroupCreated }) {
         ) : (
           <div className="flex flex-col">
             {data.recent_expenses.map((e) => (
-              <ExpenseRow key={e.expense_id} expense={e} people={people} groupName={groupName[e.group_id]} />
+              <ExpenseRow
+                key={e.expense_id}
+                expense={e}
+                people={people}
+                currentUserId={currentUserId}
+                groupName={groupName[e.group_id]}
+              />
             ))}
           </div>
         )}
@@ -242,29 +301,51 @@ function Overview({ data, people, onOpenGroup, onGroupCreated }) {
   )
 }
 
-function ExpenseRow({ expense: e, people, groupName, onDelete }) {
-  const payer = people[e.paid_by]
+function ExpenseRow({ expense: e, people, currentUserId, groupName, onEdit, onDelete }) {
+  const payer = e.paid_by === currentUserId ? { name: 'You' } : people[e.paid_by]
+  const net = netForUser(e, currentUserId)
+  const involved = e.paid_by === currentUserId || e.split_between.includes(currentUserId)
+
+  let tone = 'text-[var(--text-2)]'
+  let note = involved ? 'your own expense' : 'not involved'
+  if (net > 0) {
+    tone = 'text-emerald-400'
+    note = `you get back ${fmtMoney(net, e.currency)}`
+  } else if (net < 0) {
+    tone = 'text-red-400'
+    note = `you owe ${fmtMoney(net, e.currency)}`
+  }
+
   return (
     <div className="group flex items-center justify-between gap-3 py-2.5 border-b border-[var(--border)] last:border-b-0">
-      <div className="min-w-0">
-        <div className="text-[14px] font-medium text-[var(--text-1)] truncate flex items-center gap-1.5">
-          {e.recurring_id && <Repeat size={12} className="text-accent-400 shrink-0" title="Recurring" />}
-          {e.description}
-        </div>
-        <div className="text-[11.5px] text-[var(--text-3)] mt-0.5">
-          {payer?.name || payer?.email || 'Someone'} paid · split {e.split_between.length}{' '}
-          {e.split_between.length === 1 ? 'way' : 'ways'}
-          {groupName ? ` · ${groupName}` : ''} · {e.date}
+      <div className="flex items-center gap-2.5 min-w-0">
+        <span
+          className={`w-1 self-stretch rounded-full shrink-0 ${net > 0 ? 'bg-emerald-400' : net < 0 ? 'bg-red-400' : 'bg-[var(--border-2)]'}`}
+        />
+        <div className="min-w-0">
+          <div className="text-[14px] font-medium text-[var(--text-1)] truncate flex items-center gap-1.5">
+            {e.recurring_id && <Repeat size={12} className="text-accent-400 shrink-0" title="Recurring" />}
+            {e.description}
+          </div>
+          <div className="text-[11.5px] text-[var(--text-3)] mt-0.5">
+            {payer?.name || payer?.email || 'Someone'} paid · split {e.split_between.length}{' '}
+            {e.split_between.length === 1 ? 'way' : 'ways'}
+            {groupName ? ` · ${groupName}` : ''} · {e.date}
+          </div>
         </div>
       </div>
       <div className="flex items-center gap-1 shrink-0">
-        <div className="text-[13px] font-mono font-medium text-[var(--text-2)]">{fmtMoney(e.amount, e.currency)}</div>
+        <div className="text-right">
+          <div className={`text-[13px] font-mono font-medium ${tone}`}>{fmtMoney(e.amount, e.currency)}</div>
+          <div className={`text-[11px] ${net === 0 ? 'text-[var(--text-3)]' : tone}`}>{note}</div>
+        </div>
+        {onEdit && (
+          <button onClick={() => onEdit(e)} className={`${rowActionCls} hover:text-accent-400 hover:bg-accent-500/10`} title="Edit expense">
+            <Pencil size={13} />
+          </button>
+        )}
         {onDelete && (
-          <button
-            onClick={() => onDelete(e)}
-            className="opacity-0 group-hover:opacity-100 w-7 h-7 rounded-lg flex items-center justify-center text-[var(--text-3)] hover:text-red-400 hover:bg-red-500/10 transition-all"
-            title="Delete expense"
-          >
+          <button onClick={() => onDelete(e)} className={`${rowActionCls} hover:text-red-400 hover:bg-red-500/10`} title="Delete expense">
             <Trash2 size={14} />
           </button>
         )}
@@ -314,20 +395,33 @@ function AddMemberForm({ groupId, onAdded }) {
   )
 }
 
-function ExpenseForm({ group, currentUserId, onSaved }) {
-  const memberIds = group.members.map((m) => m.user_id)
-  const blank = () => ({
-    description: '',
-    amount: '',
-    currency: group.currency,
-    paidBy: currentUserId,
-    split: memberIds,
-    date: todayStr(),
-    frequency: '',
-    endDate: '',
-  })
-  const [open, setOpen] = useState(false)
-  const [form, setForm] = useState(blank)
+// Creates a one-off or recurring expense, or edits an existing one when
+// `expense` is given (a single occurrence, so the repeat options are hidden).
+function ExpenseForm({ group, currentUserId, expense, onSaved, onCancel }) {
+  const editing = Boolean(expense)
+  const [form, setForm] = useState(() =>
+    editing
+      ? {
+          description: expense.description,
+          amount: String(expense.amount),
+          currency: expense.currency,
+          paidBy: expense.paid_by,
+          split: expense.split_between,
+          date: expense.date,
+          frequency: '',
+          endDate: '',
+        }
+      : {
+          description: '',
+          amount: '',
+          currency: group.currency,
+          paidBy: currentUserId,
+          split: group.members.map((m) => m.user_id),
+          date: todayStr(),
+          frequency: '',
+          endDate: '',
+        },
+  )
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
   const set = (patch) => setForm((f) => ({ ...f, ...patch }))
@@ -335,21 +429,24 @@ function ExpenseForm({ group, currentUserId, onSaved }) {
   const toggleSplit = (uid) =>
     set({ split: form.split.includes(uid) ? form.split.filter((id) => id !== uid) : [...form.split, uid] })
 
+  const valid = form.description.trim() && parseFloat(form.amount) > 0 && form.split.length > 0
+
   const submit = async (e) => {
     e.preventDefault()
-    const amount = parseFloat(form.amount)
-    if (!form.description.trim() || !(amount > 0) || form.split.length === 0) return
+    if (!valid) return
     setSubmitting(true)
     setError('')
     const common = {
       description: form.description.trim(),
-      amount,
+      amount: parseFloat(form.amount),
       currency: form.currency,
       paid_by: form.paidBy,
       split_between: form.split,
     }
     try {
-      if (form.frequency) {
+      if (editing) {
+        await api.sharedCosts.updateExpense(group.group_id, expense.expense_id, { ...common, date: form.date })
+      } else if (form.frequency) {
         await api.sharedCosts.createRecurring(group.group_id, {
           ...common,
           frequency: form.frequency,
@@ -359,32 +456,23 @@ function ExpenseForm({ group, currentUserId, onSaved }) {
       } else {
         await api.sharedCosts.createExpense(group.group_id, { ...common, date: form.date })
       }
-      setForm(blank())
-      setOpen(false)
       onSaved()
     } catch (err) {
       setError(err.message)
-    } finally {
       setSubmitting(false)
     }
   }
 
-  if (!open) {
-    return (
-      <button
-        onClick={() => {
-          setForm(blank())
-          setOpen(true)
-        }}
-        className={dashedBtnCls}
-      >
-        <Receipt size={14} /> Add expense
-      </button>
-    )
-  }
-
   return (
-    <form onSubmit={submit} className="flex flex-col gap-3 p-4 rounded-xl bg-[var(--surf)] border border-[var(--border)]">
+    <form
+      onSubmit={submit}
+      className={`flex flex-col gap-3 p-4 rounded-xl bg-[var(--surf)] border ${editing ? 'border-accent-400 my-2' : 'border-[var(--border)]'}`}
+    >
+      {editing && (
+        <div className="text-[11px] font-semibold uppercase tracking-wider text-accent-400">
+          Edit expense{expense.recurring_id ? ' (this occurrence only)' : ''}
+        </div>
+      )}
       <input
         autoFocus
         value={form.description}
@@ -435,11 +523,13 @@ function ExpenseForm({ group, currentUserId, onSaved }) {
       </div>
 
       <div className="flex flex-wrap gap-2 items-center">
-        <select value={form.frequency} onChange={(e) => set({ frequency: e.target.value })} className={inputCls}>
-          {FREQUENCIES.map((f) => (
-            <option key={f.value} value={f.value}>{f.label}</option>
-          ))}
-        </select>
+        {!editing && (
+          <select value={form.frequency} onChange={(e) => set({ frequency: e.target.value })} className={inputCls}>
+            {FREQUENCIES.map((f) => (
+              <option key={f.value} value={f.value}>{f.label}</option>
+            ))}
+          </select>
+        )}
         <label className="flex items-center gap-1.5 text-[12px] text-[var(--text-3)]">
           {form.frequency ? 'Starts' : 'Date'}
           <input type="date" value={form.date} onChange={(e) => set({ date: e.target.value })} required className={inputCls} />
@@ -462,17 +552,13 @@ function ExpenseForm({ group, currentUserId, onSaved }) {
       <div className="flex gap-2 justify-end">
         <button
           type="button"
-          onClick={() => setOpen(false)}
+          onClick={onCancel}
           className="px-4 py-2 rounded-lg text-[13px] bg-[var(--surf-2)] border border-[var(--border)] text-[var(--text-2)] hover:text-[var(--text-1)] transition-all"
         >
           Cancel
         </button>
-        <button
-          type="submit"
-          disabled={submitting || !form.description.trim() || !(parseFloat(form.amount) > 0) || form.split.length === 0}
-          className={primaryBtnCls}
-        >
-          {form.frequency ? 'Add recurring expense' : 'Add expense'}
+        <button type="submit" disabled={submitting || !valid} className={primaryBtnCls}>
+          {editing ? 'Save changes' : form.frequency ? 'Add recurring expense' : 'Add expense'}
         </button>
       </div>
     </form>
@@ -484,6 +570,8 @@ function GroupDetail({ group, currentUserId, onBack, onGroupChanged }) {
   const [recurring, setRecurring] = useState([])
   const [balances, setBalances] = useState(null)
   const [error, setError] = useState('')
+  const [adding, setAdding] = useState(false)
+  const [editingId, setEditingId] = useState(null)
 
   const people = useMemo(() => Object.fromEntries(group.members.map((m) => [m.user_id, m])), [group.members])
   const nameOf = (uid) => (uid === currentUserId ? 'You' : people[uid]?.name || people[uid]?.email || 'Unknown')
@@ -533,21 +621,42 @@ function GroupDetail({ group, currentUserId, onBack, onGroupChanged }) {
     }
   }
 
+  // The current user's net position in this group, per currency.
+  const myBalance = {}
+  for (const c of balances?.currencies || []) {
+    const mine = c.balances.find((b) => b.user_id === currentUserId)
+    if (mine && mine.amount !== 0) myBalance[c.currency] = mine.amount
+  }
+  const myEntries = Object.entries(myBalance)
+
   return (
     <>
-      <GlassCard>
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <button onClick={onBack} className="flex items-center gap-1 text-[13px] text-[var(--text-3)] hover:text-[var(--text-1)]">
-            <ChevronLeft size={15} /> All groups
-          </button>
-          <label className="flex items-center gap-2 text-[12px] text-[var(--text-3)]">
-            Default currency
-            <CurrencySelect value={group.currency} onChange={changeCurrency} />
+      <PageHeader
+        group={group}
+        onBack={onBack}
+        chips={
+          balances &&
+          (myEntries.length === 0 ? (
+            <StatChip tone="neutral" label="You" value="settled" />
+          ) : (
+            myEntries.map(([currency, amount]) => (
+              <StatChip
+                key={currency}
+                tone={amount > 0 ? 'good' : 'bad'}
+                label={amount > 0 ? "You're owed" : 'You owe'}
+                value={fmtMoney(amount, currency)}
+              />
+            ))
+          ))
+        }
+        actions={
+          <label className="flex items-center gap-2 text-[11.5px] text-[var(--text-3)]" title="Used for new expenses in this group">
+            Currency
+            <CurrencySelect value={group.currency} onChange={changeCurrency} className="!py-1.5 !text-[13px]" />
           </label>
-        </div>
-        <h2 className="text-[20px] font-semibold font-serif mt-3">{group.name}</h2>
-        <ErrorLine error={error} />
-      </GlassCard>
+        }
+      />
+      <ErrorLine error={error} />
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <GlassCard>
@@ -621,7 +730,7 @@ function GroupDetail({ group, currentUserId, onBack, onGroupChanged }) {
                   <div className="text-[13px] font-mono font-medium text-[var(--text-2)]">{fmtMoney(r.amount, r.currency)}</div>
                   <button
                     onClick={() => stopRecurring(r)}
-                    className="opacity-0 group-hover:opacity-100 w-7 h-7 rounded-lg flex items-center justify-center text-[var(--text-3)] hover:text-red-400 hover:bg-red-500/10 transition-all"
+                    className={`${rowActionCls} hover:text-red-400 hover:bg-red-500/10`}
                     title="Stop recurring"
                   >
                     <Trash2 size={14} />
@@ -636,7 +745,27 @@ function GroupDetail({ group, currentUserId, onBack, onGroupChanged }) {
       <GlassCard>
         <SectionLabel>Expenses</SectionLabel>
         <div className="mb-4">
-          <ExpenseForm group={group} currentUserId={currentUserId} onSaved={load} />
+          {adding ? (
+            <ExpenseForm
+              group={group}
+              currentUserId={currentUserId}
+              onSaved={() => {
+                setAdding(false)
+                load()
+              }}
+              onCancel={() => setAdding(false)}
+            />
+          ) : (
+            <button
+              onClick={() => {
+                setEditingId(null)
+                setAdding(true)
+              }}
+              className={dashedBtnCls}
+            >
+              <Receipt size={14} /> Add expense
+            </button>
+          )}
         </div>
         {expenses === null ? (
           <div className="flex flex-col gap-3 py-2">
@@ -646,9 +775,33 @@ function GroupDetail({ group, currentUserId, onBack, onGroupChanged }) {
           <EmptyState icon={Receipt} title="No expenses in this group yet." />
         ) : (
           <div className="flex flex-col">
-            {expenses.map((e) => (
-              <ExpenseRow key={e.expense_id} expense={e} people={people} onDelete={removeExpense} />
-            ))}
+            {expenses.map((e) =>
+              e.expense_id === editingId ? (
+                <ExpenseForm
+                  key={e.expense_id}
+                  group={group}
+                  currentUserId={currentUserId}
+                  expense={e}
+                  onSaved={() => {
+                    setEditingId(null)
+                    load()
+                  }}
+                  onCancel={() => setEditingId(null)}
+                />
+              ) : (
+                <ExpenseRow
+                  key={e.expense_id}
+                  expense={e}
+                  people={people}
+                  currentUserId={currentUserId}
+                  onEdit={(exp) => {
+                    setAdding(false)
+                    setEditingId(exp.expense_id)
+                  }}
+                  onDelete={removeExpense}
+                />
+              ),
+            )}
           </div>
         )}
       </GlassCard>
@@ -684,26 +837,22 @@ export default function SharedCosts() {
 
   return (
     <PageTransition>
-      <motion.section
-        className="glass rounded-2xl p-7 md:p-9"
-        initial={{ opacity: 0, y: 8 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.35 }}
-      >
-        <h1 className="text-[26px] md:text-[28px] font-semibold tracking-normal font-serif mb-1.5">Shared Costs</h1>
-        <p className="text-[14px] text-[var(--text-2)]">Split group expenses and settle up automatically</p>
-      </motion.section>
-
       {data === null && !error ? (
-        <GlassCard>
-          <div className="flex flex-col gap-3 py-2">
-            {[1, 2, 3].map((i) => <div key={i} className="skeleton-line" style={{ width: `${60 + i * 10}%` }} />)}
-          </div>
-        </GlassCard>
+        <>
+          <PageHeader />
+          <GlassCard>
+            <div className="flex flex-col gap-3 py-2">
+              {[1, 2, 3].map((i) => <div key={i} className="skeleton-line" style={{ width: `${60 + i * 10}%` }} />)}
+            </div>
+          </GlassCard>
+        </>
       ) : error ? (
-        <GlassCard>
-          <EmptyState title="Could not load shared costs." subtitle="Backend may be offline." />
-        </GlassCard>
+        <>
+          <PageHeader />
+          <GlassCard>
+            <EmptyState title="Could not load shared costs." subtitle="Backend may be offline." />
+          </GlassCard>
+        </>
       ) : openGroup ? (
         <GroupDetail
           key={openGroup.group_id}
@@ -719,6 +868,7 @@ export default function SharedCosts() {
         <Overview
           data={data}
           people={people}
+          currentUserId={user?.user_id}
           onOpenGroup={setOpenGroupId}
           onGroupCreated={(group) => {
             setData((d) => ({ ...d, groups: [...d.groups, { ...group, totals: {} }] }))
