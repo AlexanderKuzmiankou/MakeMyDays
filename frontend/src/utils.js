@@ -1,5 +1,24 @@
+// Dates are local calendar days ("YYYY-MM-DD"), not UTC: toISOString() would
+// report yesterday's date shortly after midnight in time zones east of UTC.
+export function dateStr(d) {
+  const pad = (n) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+}
+
 export function todayStr() {
-  return new Date().toISOString().slice(0, 10)
+  return dateStr(new Date())
+}
+
+// "YYYY-MM-DD" -> local midnight (new Date("YYYY-MM-DD") would be UTC midnight).
+export function parseDate(str) {
+  const [y, m, d] = str.slice(0, 10).split('-').map(Number)
+  return new Date(y, m - 1, d)
+}
+
+export function addDays(d, n) {
+  const copy = new Date(d)
+  copy.setDate(copy.getDate() + n)
+  return copy
 }
 
 export function last7Days() {
@@ -8,10 +27,6 @@ export function last7Days() {
     d.setDate(d.getDate() - 6 + i)
     return d
   })
-}
-
-export function dateStr(d) {
-  return d.toISOString().slice(0, 10)
 }
 
 export function fmtTime(iso) {
@@ -40,10 +55,9 @@ export function eventStatus(start, end) {
 
 export function dueInfo(dueStr) {
   if (!dueStr) return null
-  const due = new Date(dueStr)
+  const due = parseDate(dueStr)
   const now = new Date()
   now.setHours(0, 0, 0, 0)
-  due.setHours(0, 0, 0, 0)
   const diff = Math.round((due - now) / 86400000)
   if (diff < 0) return { label: 'Overdue', tone: 'red' }
   if (diff === 0) return { label: 'Today', tone: 'amber' }

@@ -139,7 +139,7 @@ function MiniNotesPreview() {
 }
 
 const PREVIEWS = [
-  { title: 'Tasks & Calendar', desc: 'Google Tasks and Calendar, together in one view', icon: CalendarCheck2, Preview: MiniTasksPreview },
+  { title: 'Tasks & Calendar', desc: 'Your to-dos and appointments, together in one view', icon: CalendarCheck2, Preview: MiniTasksPreview },
   { title: 'Habits', desc: 'Streaks, goals, and a 7-day view that keeps you honest', icon: Flame, Preview: MiniHabitsPreview },
   { title: 'Shopping', desc: 'A wishlist for things worth saving up for', icon: ShoppingBag, Preview: MiniShoppingPreview },
   { title: 'Budget', desc: 'Income, expenses, and balance at a glance', icon: Wallet, Preview: MiniBudgetPreview },

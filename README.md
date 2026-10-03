@@ -5,7 +5,7 @@
 > A personal assistant and tracking system with a purpose to help you make your day easier and more organized.
 
 MakeMyDays is a self-hosted web-app which is used as a personal assistant and organizer. It covers multiple areas of your life and ensures an easy and intuitive tracking of your tasks, calendars, budget, etc. 
-It can read your Google Calendar entries and the tasks from it, track your habits, organize your budget, keep track of your spendings and your shopping lists.
+It keeps your tasks and appointments, tracks your habits, organize your budget, keep track of your spendings and your shopping lists.
 Built from scratch. Touching cloud infrastructure, containers, CI/CD, Kubernetes and monitoring. AI features to be added.
 
 ---
@@ -33,7 +33,7 @@ Browser → Cloudflare Tunnel → Raspberry Pi 3B+
                     │               │               │
                FastAPI app     Prometheus      Grafana
                     │               │               │
-              Google Calendar   node-exporter   Dashboards
+              DynamoDB          node-exporter   Dashboards
               Anthropic Claude
               AWS Polly
               AWS SSM
@@ -48,7 +48,7 @@ Browser → Cloudflare Tunnel → Raspberry Pi 3B+
 | Language | Python 3.12 |
 | Web framework | FastAPI |
 | AI | Anthropic Claude API |
-| Calendar | Google Calendar API |
+| Tasks & calendar | Per-user, stored in DynamoDB |
 | Messaging | Telegram Bot API |
 | TTS | AWS Polly (Phase 5) |
 | Container | Docker |
@@ -71,7 +71,6 @@ Check Project in this Repo
 ### Prerequisites
 
 - Python 3.12+
-- A Google Cloud project with Calendar API enabled
 
 ### Local setup
 

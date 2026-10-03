@@ -21,8 +21,20 @@ export const api = {
   health: () => request('/health'),
   briefing: () => request('/api/briefing'),
 
-  tasks: () => request('/api/tasks'),
-  events: () => request('/api/events'),
+  tasks: {
+    list: () => request('/api/tasks'),
+    create: (task) => request('/api/tasks', { method: 'POST', body: JSON.stringify(task) }),
+    update: (id, patch) => request(`/api/tasks/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+    toggle: (id) => request(`/api/tasks/${id}/toggle`, { method: 'POST' }),
+    remove: (id) => request(`/api/tasks/${id}`, { method: 'DELETE' }),
+  },
+
+  events: {
+    list: (start, end) => request(`/api/events?${new URLSearchParams({ start, end })}`),
+    create: (event) => request('/api/events', { method: 'POST', body: JSON.stringify(event) }),
+    update: (id, patch) => request(`/api/events/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+    remove: (id) => request(`/api/events/${id}`, { method: 'DELETE' }),
+  },
 
   auth: {
     me: () => request('/api/auth/me'),

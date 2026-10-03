@@ -27,13 +27,6 @@ spec:
           env:
             - name: ENV
               value: "production"
-          volumeMounts:
-            - name: google-credentials
-              mountPath: /app/credentials.json
-              subPath: credentials.json
-            - name: google-token
-              mountPath: /app/token.json
-              subPath: token.json
           resources:
             limits:
               memory: "256Mi"
@@ -41,14 +34,5 @@ spec:
             requests:
               memory: "128Mi"
               cpu: "100m"
-      volumes:
-        - name: google-credentials
-          hostPath:
-            path: /home/ubuntu/credentials.json
-            type: File
-        - name: google-token
-          hostPath:
-            path: /home/ubuntu/token.json
-            type: File
       imagePullSecrets:
         - name: ecr-secret

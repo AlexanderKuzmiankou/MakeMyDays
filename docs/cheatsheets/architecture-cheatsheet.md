@@ -28,7 +28,6 @@ flowchart LR
     APP --> SSM[SSM Parameter Store]
     APP --> POLLY[AWS Polly]
     APP --> CLAUDE[Anthropic API]
-    APP --> GCAL[Google Calendar + Tasks]
     APP --> TG[Telegram Bot API]
 
     GH[GitHub Actions] -->|multi-arch image| ECR[(ECR)]
@@ -67,7 +66,8 @@ app/
     service.py         #   DynamoDB access
     security.py        #   PBKDF2 hashing, signed session tokens
     dependencies.py    #   get_current_user, set_session_cookie
-  briefing/            # calendar, tasks, Claude briefing, Polly audio
+  briefing/            # Claude briefing, Polly audio
+  planner/             # per-user tasks + schedule (appointments)
   habits/              # habit CRUD + streak logic
   shopping/            # shopping list CRUD
   notifications/       # Telegram sender
@@ -106,8 +106,13 @@ Services raise `ValueError`, routers translate that into `404` / `409` / `401`. 
 | POST | `/api/auth/login` | no | sets session cookie |
 | POST | `/api/auth/logout` | no | deletes cookie, `204` |
 | GET / PATCH | `/api/auth/me` | yes | current user / update name + avatar |
-| GET | `/api/events` | no | today's Google Calendar events |
-| GET | `/api/tasks` | no | open Google Tasks across all lists |
+| GET / POST | `/api/tasks` | yes | list (open by due date, then completed) / create |
+| PATCH | `/api/tasks/{id}` | yes | edit `title` / `notes` / `due`; `due: null` clears it |
+| POST | `/api/tasks/{id}/toggle` | yes | completes / reopens; sets `completed_at` |
+| DELETE | `/api/tasks/{id}` | yes | `204` |
+| GET / POST | `/api/events` | yes | list `?start=&end=` (YYYY-MM-DD, inclusive) / create |
+| PATCH | `/api/events/{id}` | yes | edit; `start_time: null` makes it all-day |
+| DELETE | `/api/events/{id}` | yes | `204` |
 | GET | `/api/briefing` | no | Claude briefing (currently placeholder) |
 | GET | `/api/briefing/audio` | no | MP3 via Polly, streamed |
 | GET / POST | `/api/habits` | yes | list / create |
@@ -157,6 +162,8 @@ next request -> read cookie -> verify HMAC signature -> check exp
 | Table | Partition key | Other attributes | Access pattern |
 |---|---|---|---|
 | `makemydays-users` | `email` | `user_id`, `name`, `password_hash`, `avatar_url`, `created_at` | `get_item` by email |
+| `makemydays-user-tasks` | `user_id` + sort key `task_id` | `title`, `notes`, `due`, `completed`, `completed_at`, `created_at` | `query` by `user_id` |
+| `makemydays-user-events` | `user_id` + sort key `event_id` | `title`, `date`, `start_time`/`end_time` (HH:MM, absent = all-day), `location`, `notes` | `query` by `user_id`, date range filtered in the app |
 | `makemydays-user-habits` | `user_id` + sort key `habit_id` | `name`, `emoji`, `goal_streak`, `completions` (string set), `created_at` | `query` by `user_id`; habits addressed by `(user_id, habit_id)` |
 | `makemydays-shopping-items` | `user_id` + sort key `item_id` | `name`, `description`, `url`, `price_min/max`, `purchased`, `created_at` | `query` by `user_id`; items addressed by `(user_id, item_id)` |
 | `makemydays-shared-groups` | `group_id` | `name`, `currency` (ISO code, default `EUR`), `member_ids` (string set), `members` (map user_id -> name/email), `created_by` | `scan` with `contains(member_ids, user_id)` |
@@ -182,7 +189,6 @@ DynamoDB gotchas already hit in this codebase:
 | `.env` (local only, gitignored) | API keys, bot token, chat id, `SESSION_SECRET` | local dev |
 | SSM Parameter Store, `/makemyday/<name>` SecureString | same secrets in prod | app when `ENV=production` |
 | GitHub Secrets | AWS access key pair for the pipeline | GitHub Actions only |
-| Google OAuth files | `credentials.json`, `token.json` (gitignored + dockerignored) | calendar client, mounted as volumes |
 
 Switch logic lives in `app/config.py`:
 
@@ -193,7 +199,6 @@ else:                                   # read from .env
 
 Reminders:
 
-- Mounting a file that doesn't exist on the host makes Docker create a **directory** with that name. Make sure `token.json` exists before `docker run`.
 - On EC2 the IAM role supplied AWS credentials automatically. **The Pi has no instance role**, so it needs its own locally configured AWS credentials with least-privilege access (SSM read, ECR pull, Polly, DynamoDB tables).
 - Never bake secrets into the image. `.dockerignore` excludes `.env`, `credentials.json`, `token.json`.
 

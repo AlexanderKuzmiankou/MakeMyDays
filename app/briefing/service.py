@@ -6,7 +6,6 @@ import io
 from dotenv import load_dotenv
 from fastapi.responses import StreamingResponse
 
-from app.briefing.calendar_client import get_tasks, get_todays_events
 from app.config import load_config
 from app.notifications.telegram_bot import send_briefing
 
@@ -17,8 +16,8 @@ def create_briefing() -> dict:
     Get the briefing as a JSON response, based on the user's calendar events and tasks for today.
     The briefing is generated using the Claude API and sent to the user via Telegram.
     """
-    #events = get_todays_events()
-    #tasks = get_tasks()
+    # TODO: build from the user's own tasks and events (app.planner); the Google
+    # Calendar/Tasks source was removed. format_context still expects the old shape.
     #briefing = generate_briefing(events, tasks)
     #send_briefing(briefing)
     return {"briefing": "briefing text"}  # Placeholder for testing
