@@ -156,7 +156,7 @@ next request -> read cookie -> verify HMAC signature -> check exp
 | Table | Partition key | Other attributes | Access pattern |
 |---|---|---|---|
 | `makemydays-users` | `email` | `user_id`, `name`, `password_hash`, `avatar_url`, `created_at` | `get_item` by email |
-| `makemydays-habits` | `habit_id` | `user_id`, `name`, `emoji`, `goal_streak`, `completions` (string set) | `scan` filtered by `user_id` |
+| `makemydays-user-habits` | `user_id` + sort key `habit_id` | `name`, `emoji`, `goal_streak`, `completions` (string set), `created_at` | `query` by `user_id`; habits addressed by `(user_id, habit_id)` |
 | `makemydays-shopping-items` | `user_id` + sort key `item_id` | `name`, `description`, `url`, `price_min/max`, `purchased`, `created_at` | `query` by `user_id`; items addressed by `(user_id, item_id)` |
 | `makemydays-shared-groups` | `group_id` | `name`, `currency` (ISO code, default `EUR`), `member_ids` (string set), `members` (map user_id -> name/email), `created_by` | `scan` with `contains(member_ids, user_id)` |
 | `makemydays-shared-expenses` | `expense_id` | `group_id`, `description`, `amount`, `currency`, `paid_by`, `split_between` (list), `date`, `recurring_id` (if generated) | `scan` filtered by `group_id` |
@@ -303,7 +303,7 @@ Two ways to run the frontend:
 - [ ] `SESSION_SECRET` not read from SSM like the other secrets
 - [ ] Calendar "today" window is computed in UTC, not local time
 - [ ] `/metrics` is publicly reachable through the tunnel
-- [ ] Habits/shopping use `scan`; switch to a `user_id` GSI + `query`
+- [x] Habits/shopping use `scan`; switch to a `user_id` GSI + `query` (done: both tables are keyed by `user_id`)
 - [ ] Budget, Shared Costs, Notes pages have no backend
 - [ ] `infra/` and `k8s/` still describe the EC2 era
 

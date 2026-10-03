@@ -2,9 +2,13 @@ import uuid
 from datetime import date, timedelta
 
 import boto3
-from boto3.dynamodb.conditions import Attr
+from boto3.dynamodb.conditions import Key
+from botocore.exceptions import ClientError
 
-TABLE_NAME = "makemydays-habits"
+# Partition key user_id + sort key habit_id: one user has many habits, and a
+# user's habits are a single query. Habits can only be addressed through their
+# owner's user_id, so ownership is enforced by the key itself.
+TABLE_NAME = "makemydays-user-habits"
 
 _dynamodb = None
 
@@ -16,101 +20,93 @@ def _table():
     return _dynamodb.Table(TABLE_NAME)
 
 
+def _key(user_id: str, habit_id: str) -> dict:
+    return {"user_id": user_id, "habit_id": habit_id}
+
+
 def _calculate_current_streak(completions: set[str]) -> int:
-    streak = 0
     check = date.today()
-    while True:
-        if check.isoformat() in completions:
-            streak += 1
-            check -= timedelta(days=1)
-        elif streak == 0 and (check + timedelta(days=1)).isoformat() in completions:
-            # allow streak that ended yesterday to still show
-            check -= timedelta(days=1)
-        else:
-            break
-        if streak > 365:
-            break
+    # Today not ticked yet: a streak running up to yesterday is still alive.
+    if check.isoformat() not in completions:
+        check -= timedelta(days=1)
+    streak = 0
+    while check.isoformat() in completions and streak <= 365:
+        streak += 1
+        check -= timedelta(days=1)
     return streak
 
 
+def _serialize(item: dict) -> dict:
+    completions: set[str] = set(item.get("completions", []))
+    return {
+        "habit_id": item["habit_id"],
+        "name": item["name"],
+        "emoji": item.get("emoji", "⭐"),
+        "goal_streak": int(item.get("goal_streak", 30)),
+        "current_streak": _calculate_current_streak(completions),
+        "completions": sorted(completions),
+        "created_at": item.get("created_at", ""),
+    }
+
+
 def list_habits(user_id: str) -> list[dict]:
-    response = _table().scan(FilterExpression=Attr("user_id").eq(user_id))
-    habits = []
-    for item in response.get("Items", []):
-        completions: set[str] = set(item.get("completions", []))
-        goal_streak = int(item.get("goal_streak", 30))
-        current_streak = _calculate_current_streak(completions)
-        habits.append({
-            "habit_id": item["habit_id"],
-            "name": item["name"],
-            "emoji": item.get("emoji", "⭐"),
-            "goal_streak": goal_streak,
-            "current_streak": current_streak,
-            "completions": sorted(completions),
-            "created_at": item.get("created_at", ""),
-        })
-    habits.sort(key=lambda h: h["created_at"])
+    kwargs = {"KeyConditionExpression": Key("user_id").eq(user_id)}
+    habits: list[dict] = []
+    while True:
+        response = _table().query(**kwargs)
+        habits.extend(_serialize(i) for i in response.get("Items", []))
+        if "LastEvaluatedKey" not in response:
+            break
+        kwargs["ExclusiveStartKey"] = response["LastEvaluatedKey"]
+    habits.sort(key=lambda h: (h["created_at"], h["habit_id"]))
     return habits
 
 
 def create_habit(user_id: str, name: str, emoji: str = "⭐", goal_streak: int = 30) -> dict:
-    habit_id = str(uuid.uuid4())
-    created_at = date.today().isoformat()
     # DynamoDB does not allow empty sets, so omit completions on creation
-    _table().put_item(Item={
-        "habit_id": habit_id,
+    record = {
         "user_id": user_id,
-        "name": name,
-        "emoji": emoji,
+        "habit_id": str(uuid.uuid4()),
+        "name": name.strip(),
+        "emoji": emoji.strip() or "⭐",
         "goal_streak": goal_streak,
-        "created_at": created_at,
-    })
-    return {
-        "habit_id": habit_id,
-        "name": name,
-        "emoji": emoji,
-        "goal_streak": goal_streak,
-        "current_streak": 0,
-        "completions": [],
-        "created_at": created_at,
+        "created_at": date.today().isoformat(),
     }
+    _table().put_item(Item=record)
+    return _serialize(record)
 
 
 def toggle_completion(user_id: str, habit_id: str, date_str: str) -> dict:
     table = _table()
-    response = table.get_item(Key={"habit_id": habit_id})
-    item = response.get("Item")
-    if not item or item.get("user_id") != user_id:
+    item = table.get_item(Key=_key(user_id, habit_id)).get("Item")
+    if not item:
         raise ValueError(f"Habit {habit_id} not found")
 
     completions: set[str] = set(item.get("completions", []))
     if date_str in completions:
         completions.discard(date_str)
-        table.update_item(
-            Key={"habit_id": habit_id},
-            UpdateExpression="DELETE completions :d",
-            ExpressionAttributeValues={":d": {date_str}},
-        )
+        action = "DELETE"
     else:
         completions.add(date_str)
-        table.update_item(
-            Key={"habit_id": habit_id},
-            UpdateExpression="ADD completions :d",
-            ExpressionAttributeValues={":d": {date_str}},
-        )
+        action = "ADD"
+    table.update_item(
+        Key=_key(user_id, habit_id),
+        UpdateExpression=f"{action} completions :d",
+        ExpressionAttributeValues={":d": {date_str}},
+    )
 
-    current_streak = _calculate_current_streak(completions)
     return {
         "habit_id": habit_id,
         "done": date_str in completions,
-        "current_streak": current_streak,
+        "current_streak": _calculate_current_streak(completions),
         "completions": sorted(completions),
     }
 
 
 def delete_habit(user_id: str, habit_id: str) -> None:
-    table = _table()
-    item = table.get_item(Key={"habit_id": habit_id}).get("Item")
-    if not item or item.get("user_id") != user_id:
-        raise ValueError(f"Habit {habit_id} not found")
-    table.delete_item(Key={"habit_id": habit_id})
+    try:
+        _table().delete_item(Key=_key(user_id, habit_id), ConditionExpression="attribute_exists(habit_id)")
+    except ClientError as e:
+        if e.response["Error"]["Code"] == "ConditionalCheckFailedException":
+            raise ValueError(f"Habit {habit_id} not found")
+        raise

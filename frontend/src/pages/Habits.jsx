@@ -7,34 +7,81 @@ import PageTransition from '../components/PageTransition.jsx'
 import { api } from '../api.js'
 import { dateStr, last7Days, todayStr } from '../utils.js'
 
-const RING_R = 48
-const RING_C = 2 * Math.PI * RING_R
-
 function isDone(habit, date) {
   return habit.completions.includes(date)
 }
 
-function CompletionRing({ done, total }) {
-  const pct = total ? done / total : 0
+function SummaryTile({ label, value, hint, tone = 'text-[var(--text-1)]' }) {
   return (
-    <div className="relative w-28 h-28 shrink-0">
-      <svg width="112" height="112" viewBox="0 0 112 112" className="-rotate-90">
-        <circle cx="56" cy="56" r={RING_R} fill="none" stroke="#E2DDD5" strokeWidth="7" />
-        <motion.circle
-          cx="56" cy="56" r={RING_R} fill="none"
-          stroke={pct >= 1 ? '#1F4035' : '#C8622A'}
-          strokeWidth="7" strokeLinecap="round"
-          strokeDasharray={RING_C}
-          initial={{ strokeDashoffset: RING_C }}
-          animate={{ strokeDashoffset: RING_C * (1 - pct) }}
-          transition={{ duration: 0.9, ease: [0.34, 1.56, 0.64, 1] }}
-        />
-      </svg>
-      <div className="absolute inset-0 flex flex-col items-center justify-center">
-        <span className="text-2xl font-bold tracking-tight">{done}</span>
-        <span className="text-[11px] text-[var(--text-3)]">/ {total}</span>
-      </div>
+    <div className="min-w-0 rounded-xl bg-[var(--surf)] border border-[var(--border)] px-3 py-2.5 sm:px-4 sm:py-3">
+      <div className="text-[10px] sm:text-[11px] font-semibold uppercase tracking-wider text-[var(--text-3)] truncate">{label}</div>
+      <div className={`mt-0.5 text-[16px] sm:text-[20px] leading-tight font-semibold font-serif truncate ${tone}`}>{value}</div>
+      {hint && <div className="text-[11px] text-[var(--text-3)] truncate">{hint}</div>}
     </div>
+  )
+}
+
+function Header({ habits, days, today }) {
+  const total = habits?.length ?? 0
+  const doneToday = habits?.filter((h) => isDone(h, today)).length ?? 0
+  const best = habits?.reduce((top, h) => (!top || h.current_streak > top.current_streak ? h : top), null)
+  const weekDone = habits?.reduce((n, h) => n + days.filter((d) => isDone(h, dateStr(d))).length, 0) ?? 0
+  const weekPct = total ? Math.round((weekDone / (total * days.length)) * 100) : 0
+  const progress = total ? Math.round((doneToday / total) * 100) : 0
+  const allDone = total > 0 && doneToday === total
+
+  return (
+    <motion.section
+      className="glass rounded-2xl relative overflow-hidden p-5 sm:p-7"
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.35 }}
+    >
+      <div className="pointer-events-none absolute -top-24 -right-20 w-72 h-72 rounded-full bg-emerald-500/15 blur-3xl" />
+      <div className="pointer-events-none absolute -bottom-28 -left-16 w-60 h-60 rounded-full bg-accent-500/10 blur-3xl" />
+
+      <div className="relative flex items-center gap-3.5">
+        <div className="w-11 h-11 sm:w-12 sm:h-12 rounded-xl bg-gradient-to-br from-emerald-400 to-emerald-600 flex items-center justify-center shrink-0 shadow-lg shadow-emerald-500/20">
+          <Sprout size={20} className="text-white" />
+        </div>
+        <div className="min-w-0">
+          <h1 className="text-[22px] sm:text-[28px] leading-tight font-semibold font-serif">Habits</h1>
+          <p className="text-[12.5px] sm:text-[14px] text-[var(--text-2)]">Build momentum, one day at a time</p>
+        </div>
+      </div>
+
+      <div className="relative grid grid-cols-3 gap-2 sm:gap-3 mt-5">
+        <SummaryTile
+          label="Today"
+          value={habits ? `${doneToday}/${total}` : '–'}
+          hint={allDone ? 'all done 🎉' : 'done'}
+          tone="text-emerald-400"
+        />
+        <SummaryTile
+          label="Best streak"
+          value={best?.current_streak ? `🔥 ${best.current_streak}d` : '–'}
+          hint={best?.current_streak ? best.name : 'no streak yet'}
+          tone="text-amber-400"
+        />
+        <SummaryTile label="This week" value={habits ? `${weekPct}%` : '–'} hint={`${weekDone} check-ins`} tone="text-accent-400" />
+      </div>
+
+      {total > 0 && (
+        <div className="relative mt-4">
+          <div className="h-1.5 rounded-full bg-[var(--surf-2)] overflow-hidden">
+            <motion.div
+              className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-emerald-400"
+              initial={{ width: 0 }}
+              animate={{ width: `${progress}%` }}
+              transition={{ duration: 0.5 }}
+            />
+          </div>
+          <div className="mt-1.5 text-[11.5px] text-[var(--text-3)]">
+            {allDone ? 'Every habit done today — nice!' : `${total - doneToday} left for today`}
+          </div>
+        </div>
+      )}
+    </motion.section>
   )
 }
 
@@ -98,7 +145,7 @@ function HabitRow({ habit, days, today, onToggle, onDelete }) {
         </div>
         <button
           onClick={() => onDelete(habit)}
-          className="opacity-0 group-hover:opacity-100 w-7 h-7 rounded-lg flex items-center justify-center text-[var(--text-3)] hover:text-red-400 hover:bg-red-500/10 transition-all shrink-0"
+          className="sm:opacity-0 sm:group-hover:opacity-100 focus:opacity-100 w-7 h-7 rounded-lg flex items-center justify-center text-[var(--text-3)] hover:text-red-400 hover:bg-red-500/10 transition-all shrink-0"
           title="Remove habit"
         >
           <Trash2 size={14} />
@@ -116,6 +163,7 @@ export default function Habits() {
   const [emoji, setEmoji] = useState('⭐')
   const [goal, setGoal] = useState(30)
   const [submitting, setSubmitting] = useState(false)
+  const [actionError, setActionError] = useState('')
 
   const days = last7Days()
   const today = todayStr()
@@ -127,6 +175,7 @@ export default function Habits() {
   }, [])
 
   const toggle = async (habit) => {
+    setActionError('')
     const done = isDone(habit, today)
     setHabits((prev) =>
       prev.map((h) =>
@@ -144,16 +193,20 @@ export default function Habits() {
             : h,
         ),
       )
-    } catch {
+    } catch (err) {
+      setActionError(err.message)
       load()
     }
   }
 
   const remove = async (habit) => {
+    if (!window.confirm(`Delete "${habit.name}" and its history?`)) return
+    setActionError('')
     setHabits((prev) => prev.filter((h) => h.habit_id !== habit.habit_id))
     try {
       await api.habits.remove(habit.habit_id)
-    } catch {
+    } catch (err) {
+      setActionError(err.message)
       load()
     }
   }
@@ -162,6 +215,7 @@ export default function Habits() {
     e.preventDefault()
     if (!name.trim()) return
     setSubmitting(true)
+    setActionError('')
     try {
       const habit = await api.habits.create({ name: name.trim(), emoji: emoji.trim() || '⭐', goal_streak: Number(goal) || 30 })
       setHabits((prev) => [...prev, habit])
@@ -169,28 +223,16 @@ export default function Habits() {
       setName('')
       setEmoji('⭐')
       setGoal(30)
+    } catch (err) {
+      setActionError(err.message)
     } finally {
       setSubmitting(false)
     }
   }
 
-  const doneToday = habits?.filter((h) => isDone(h, today)).length ?? 0
-  const total = habits?.length ?? 0
-
   return (
     <PageTransition>
-      <motion.section
-        className="glass rounded-2xl p-7 md:p-9 flex items-center gap-8"
-        initial={{ opacity: 0, y: 8 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.35 }}
-      >
-        <div className="flex-1 min-w-0">
-          <h1 className="text-[26px] md:text-[28px] font-semibold tracking-normal font-serif mb-1.5">Habits</h1>
-          <p className="text-[14px] text-[var(--text-2)]">Build momentum, one day at a time</p>
-        </div>
-        <CompletionRing done={doneToday} total={total} />
-      </motion.section>
+      <Header habits={habits} days={days} today={today} />
 
       <GlassCard>
         <div className="flex items-center justify-between mb-1">
@@ -204,6 +246,7 @@ export default function Habits() {
           </div>
         </div>
 
+        {actionError && <div className="mt-2 text-[12px] text-red-400">{actionError}</div>}
         <div className="mt-2">
           {habits === null && !error ? (
             <div className="flex flex-col gap-3 py-2">

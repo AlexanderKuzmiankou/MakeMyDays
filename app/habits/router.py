@@ -1,5 +1,7 @@
+from datetime import date
+
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 
 from app.auth.dependencies import get_current_user
 from app.habits.service import create_habit, delete_habit, list_habits, toggle_completion
@@ -8,13 +10,25 @@ router = APIRouter()
 
 
 class HabitCreate(BaseModel):
-    name: str
-    emoji: str = "⭐"
-    goal_streak: int = 30
+    name: str = Field(max_length=40)
+    emoji: str = Field(default="⭐", max_length=8)
+    goal_streak: int = Field(default=30, ge=1, le=365)
+
+    @field_validator("name")
+    @classmethod
+    def name_not_blank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("Must not be empty")
+        return value
 
 
 class ToggleRequest(BaseModel):
     date: str  # YYYY-MM-DD
+
+    @field_validator("date")
+    @classmethod
+    def valid_date(cls, value: str) -> str:
+        return date.fromisoformat(value).isoformat()
 
 
 @router.get("/api/habits")
