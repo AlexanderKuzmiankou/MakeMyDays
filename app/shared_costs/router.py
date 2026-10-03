@@ -33,6 +33,20 @@ def _validate_name(value: str | None) -> str | None:
     return value
 
 
+# A resized image from the browser is ~10-20 KB; cap well below DynamoDB's 400 KB item limit.
+MAX_AVATAR_LENGTH = 200_000
+
+
+def _validate_avatar(value: str | None) -> str | None:
+    if value is None or value == "":
+        return value
+    if not value.startswith("data:image/"):
+        raise ValueError("Avatar must be an image data URL")
+    if len(value) > MAX_AVATAR_LENGTH:
+        raise ValueError("Avatar image is too large")
+    return value
+
+
 class GroupCreate(BaseModel):
     name: str = Field(max_length=80)
     currency: str = service.DEFAULT_CURRENCY
@@ -44,8 +58,10 @@ class GroupCreate(BaseModel):
 class GroupUpdate(BaseModel):
     name: str | None = Field(default=None, max_length=80)
     currency: str | None = None
+    avatar_url: str | None = None  # "" removes the group picture
 
     _currency = field_validator("currency")(_validate_currency)
+    _avatar = field_validator("avatar_url")(_validate_avatar)
 
 
 class MemberAdd(BaseModel):
@@ -130,7 +146,7 @@ def get_group(group_id: str, user: dict = Depends(get_current_user)) -> dict:
 
 @router.patch("/groups/{group_id}")
 def patch_group(group_id: str, body: GroupUpdate, user: dict = Depends(get_current_user)) -> dict:
-    return _call(service.update_group, user["user_id"], group_id, body.name, body.currency)
+    return _call(service.update_group, user["user_id"], group_id, body.name, body.currency, body.avatar_url)
 
 
 @router.post("/groups/{group_id}/members", status_code=201)

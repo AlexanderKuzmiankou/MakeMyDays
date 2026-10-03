@@ -73,7 +73,8 @@ def _get_group_for_member(user_id: str, group_id: str) -> dict:
 
 def list_groups(user_id: str) -> list[dict]:
     items = _scan_all(_groups(), Attr("member_ids").contains(user_id))
-    groups = [_serialize_group(i) for i in items]
+    profiles: dict[str, dict | None] = {}  # shared so each person is looked up once
+    groups = [_serialize_group(i, profiles) for i in items]
     groups.sort(key=lambda g: g["created_at"])
     return groups
 
@@ -96,7 +97,14 @@ def create_group(user: dict, name: str, currency: str = DEFAULT_CURRENCY) -> dic
     return _serialize_group(record)
 
 
-def update_group(user_id: str, group_id: str, name: str | None = None, currency: str | None = None) -> dict:
+def update_group(
+    user_id: str,
+    group_id: str,
+    name: str | None = None,
+    currency: str | None = None,
+    avatar_url: str | None = None,
+) -> dict:
+    """Fields left as None are unchanged; avatar_url="" removes the group picture."""
     item = _get_group_for_member(user_id, group_id)
 
     updates: dict = {}
@@ -104,6 +112,8 @@ def update_group(user_id: str, group_id: str, name: str | None = None, currency:
         updates["name"] = name.strip()
     if currency is not None:
         updates["currency"] = currency
+    if avatar_url is not None:
+        updates["avatar_url"] = avatar_url
 
     if updates:
         # "name" is a DynamoDB reserved word, so alias every attribute.
@@ -140,19 +150,36 @@ def add_member(user_id: str, group_id: str, email: str) -> dict:
     return _serialize_group(item)
 
 
-def _serialize_group(item: dict) -> dict:
+def _profile(email: str, cache: dict[str, dict | None]) -> dict | None:
+    if email not in cache:
+        cache[email] = get_user_by_email(email) if email else None
+    return cache[email]
+
+
+def _serialize_member(uid: str, member: dict, cache: dict[str, dict | None]) -> dict:
+    # Name and avatar come from the live profile so changes show up in every
+    # group; the copy stored on the group is the fallback.
+    profile = _profile(member.get("email", ""), cache) or {}
+    return {
+        "user_id": uid,
+        "name": profile.get("name") or member.get("name", ""),
+        "email": member.get("email", ""),
+        "avatar_url": profile.get("avatar_url") or None,
+    }
+
+
+def _serialize_group(item: dict, profiles: dict[str, dict | None] | None = None) -> dict:
+    profiles = {} if profiles is None else profiles
     members = item.get("members", {})
     return {
         "group_id": item["group_id"],
         "name": item["name"],
         "currency": item.get("currency", DEFAULT_CURRENCY),
+        "avatar_url": item.get("avatar_url") or None,
         "created_by": item.get("created_by", ""),
         "created_at": item.get("created_at", ""),
         "members": sorted(
-            (
-                {"user_id": uid, "name": m.get("name", ""), "email": m.get("email", "")}
-                for uid, m in members.items()
-            ),
+            (_serialize_member(uid, m, profiles) for uid, m in members.items()),
             key=lambda m: (m["name"].lower(), m["email"]),
         ),
     }
@@ -534,7 +561,13 @@ def get_overview(user_id: str) -> dict:
             totals[e["currency"]] += _money(e["amount"])
         group["totals"] = {c: float(v) for c, v in sorted(totals.items())}
 
-        for currency, net in compute_balances(expenses).items():
+        balances = compute_balances(expenses)
+        # The current user's net position in this group: positive = is owed.
+        group["balance"] = {
+            c: float(net[user_id]) for c, net in sorted(balances.items()) if net.get(user_id)
+        }
+
+        for currency, net in balances.items():
             for t in settle_up(net):
                 if t["to"] == user_id:
                     with_people[(t["from"], currency)] += t["amount"]

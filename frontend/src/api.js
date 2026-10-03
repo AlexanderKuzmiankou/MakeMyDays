@@ -44,6 +44,7 @@ export const api = {
   shopping: {
     list: () => request('/api/shopping'),
     create: (item) => request('/api/shopping', { method: 'POST', body: JSON.stringify(item) }),
+    update: (id, patch) => request(`/api/shopping/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
     toggle: (id) => request(`/api/shopping/${id}/toggle`, { method: 'POST' }),
     remove: (id) => request(`/api/shopping/${id}`, { method: 'DELETE' }),
   },

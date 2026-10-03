@@ -170,6 +170,40 @@ def test_change_group_currency(tables, as_user):
     assert tables["groups"].items[group["group_id"]]["currency"] == "GBP"
 
 
+AVATAR = "data:image/jpeg;base64,/9j/4AAQ"
+
+
+def test_set_and_remove_group_avatar(tables, as_user):
+    gid = _group_with(ALICE)["group_id"]
+    assert client.get(f"/api/shared-costs/groups/{gid}").json()["avatar_url"] is None
+
+    res = client.patch(f"/api/shared-costs/groups/{gid}", json={"avatar_url": AVATAR})
+    assert res.status_code == 200
+    assert res.json()["avatar_url"] == AVATAR
+    assert client.get("/api/shared-costs/groups").json()[0]["avatar_url"] == AVATAR
+
+    res = client.patch(f"/api/shared-costs/groups/{gid}", json={"avatar_url": ""})
+    assert res.json()["avatar_url"] is None
+
+
+@pytest.mark.parametrize("avatar", ["https://example.com/x.png", "data:text/html,<script>", "data:image/png;" + "A" * 200_000])
+def test_group_avatar_rejects_non_images_and_oversized(tables, as_user, avatar):
+    gid = _group_with(ALICE)["group_id"]
+    res = client.patch(f"/api/shared-costs/groups/{gid}", json={"avatar_url": avatar})
+    assert res.status_code == 422
+
+
+def test_members_show_live_profile_avatar(tables, as_user):
+    group = _group_with(ALICE, BOB)
+    bob_with_photo = {**BOB, "name": "Bobby", "avatar_url": AVATAR}
+    with patch.dict(USERS_BY_EMAIL, {BOB["email"]: bob_with_photo}):
+        members = client.get(f"/api/shared-costs/groups/{group['group_id']}").json()["members"]
+    by_id = {m["user_id"]: m for m in members}
+    assert by_id["bob"]["avatar_url"] == AVATAR
+    assert by_id["bob"]["name"] == "Bobby"
+    assert by_id["alice"]["avatar_url"] is None
+
+
 def test_add_member_by_email(tables, as_user):
     group = _group_with(ALICE)
     res = client.post(f"/api/shared-costs/groups/{group['group_id']}/members", json={"email": " Bob@Example.com "})
@@ -309,7 +343,31 @@ def test_overview_reports_balances_from_current_users_perspective(tables, as_use
     }
     assert len(data["groups"]) == 2
     assert {g["totals"]["EUR"] for g in data["groups"]} == {100.0, 40.0}
+    assert {g["group_id"]: g["balance"] for g in data["groups"]} == {
+        g1["group_id"]: {"EUR": 50.0},
+        g2["group_id"]: {"EUR": -20.0},
+    }
     assert len(data["recent_expenses"]) == 2
+
+
+def test_overview_group_balance_for_expense_owed_in_full(tables, as_user):
+    group = _group_with(ALICE, BOB)
+    gid = group["group_id"]
+    service.create_expense("alice", gid, "Concert ticket", 60, split_between=["bob"])
+    service.create_expense("alice", gid, "Lunch", 20, paid_by="bob")
+
+    data = client.get("/api/shared-costs/overview").json()
+    assert data["groups"][0]["balance"] == {"EUR": 50.0}
+
+
+def test_overview_group_balance_empty_when_settled(tables, as_user):
+    group = _group_with(ALICE, BOB)
+    gid = group["group_id"]
+    service.create_expense("alice", gid, "Coffee", 10)
+    service.create_expense("alice", gid, "Coffee", 10, paid_by="bob")
+
+    data = client.get("/api/shared-costs/overview").json()
+    assert data["groups"][0]["balance"] == {}
 
 
 # ── recurring expenses ───────────────────────────────────────────────────────

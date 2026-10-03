@@ -114,6 +114,7 @@ Services raise `ValueError`, routers translate that into `404` / `409` / `401`. 
 | POST | `/api/habits/{id}/toggle` | yes | body `{date: "YYYY-MM-DD"}` |
 | DELETE | `/api/habits/{id}` | yes | `204` |
 | GET / POST | `/api/shopping` | yes | list / create |
+| PATCH | `/api/shopping/{id}` | yes | edit; omitted fields unchanged, `null` price clears it |
 | POST | `/api/shopping/{id}/toggle` | yes | flips `purchased` |
 | DELETE | `/api/shopping/{id}` | yes | `204` |
 
@@ -156,7 +157,7 @@ next request -> read cookie -> verify HMAC signature -> check exp
 |---|---|---|---|
 | `makemydays-users` | `email` | `user_id`, `name`, `password_hash`, `avatar_url`, `created_at` | `get_item` by email |
 | `makemydays-habits` | `habit_id` | `user_id`, `name`, `emoji`, `goal_streak`, `completions` (string set) | `scan` filtered by `user_id` |
-| `makemydays-shopping` | `item_id` | `user_id`, `name`, `description`, `url`, `price_min/max`, `purchased` | `scan` filtered by `user_id` |
+| `makemydays-shopping-items` | `user_id` + sort key `item_id` | `name`, `description`, `url`, `price_min/max`, `purchased`, `created_at` | `query` by `user_id`; items addressed by `(user_id, item_id)` |
 | `makemydays-shared-groups` | `group_id` | `name`, `currency` (ISO code, default `EUR`), `member_ids` (string set), `members` (map user_id -> name/email), `created_by` | `scan` with `contains(member_ids, user_id)` |
 | `makemydays-shared-expenses` | `expense_id` | `group_id`, `description`, `amount`, `currency`, `paid_by`, `split_between` (list), `date`, `recurring_id` (if generated) | `scan` filtered by `group_id` |
 | `makemydays-shared-recurring` | `recurring_id` | `group_id`, `description`, `amount`, `currency`, `paid_by`, `split_between`, `frequency` (weekly/monthly/yearly), `start_date`, `end_date`, `occurrences` | `scan` filtered by `group_id` |

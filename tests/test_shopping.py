@@ -1,13 +1,79 @@
+import copy
+import re
 from decimal import Decimal
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
+from botocore.exceptions import ClientError
 from fastapi.testclient import TestClient
 
 from app.auth.dependencies import get_current_user
 from app.main import app
+from app.shopping import service
 
 TEST_USER = {"user_id": "user-1", "email": "test@example.com", "name": "Test", "avatar_url": None, "created_at": "2026-06-01"}
+OTHER_USER = {**TEST_USER, "user_id": "user-2", "email": "other@example.com"}
+
+client = TestClient(app)
+
+
+# ── in-memory DynamoDB fake ──────────────────────────────────────────────────
+# Enforces the table's real key schema (user_id + item_id), so a request that
+# addresses items by the wrong key fails here just like it does in AWS.
+
+KEY_ATTRS = ("user_id", "item_id")
+
+
+def _validation_error(op):
+    return ClientError({"Error": {"Code": "ValidationException", "Message": "key schema mismatch"}}, op)
+
+
+class FakeTable:
+    def __init__(self):
+        self.items: dict[tuple, dict] = {}
+
+    def _key(self, key, op):
+        if set(key) != set(KEY_ATTRS):
+            raise _validation_error(op)
+        return tuple(key[a] for a in KEY_ATTRS)
+
+    def get_item(self, Key):
+        item = self.items.get(self._key(Key, "GetItem"))
+        return {"Item": copy.deepcopy(item)} if item else {}
+
+    def put_item(self, Item):
+        self.items[self._key({a: Item.get(a) for a in KEY_ATTRS}, "PutItem")] = copy.deepcopy(Item)
+
+    def query(self, KeyConditionExpression, ExclusiveStartKey=None):
+        expr = KeyConditionExpression.get_expression()
+        attr, value = expr["values"][0].name, expr["values"][1]
+        assert attr == "user_id" and expr["operator"] == "="
+        return {"Items": [copy.deepcopy(i) for i in self.items.values() if i["user_id"] == value]}
+
+    def delete_item(self, Key, ConditionExpression=None):
+        key = self._key(Key, "DeleteItem")
+        if ConditionExpression and key not in self.items:
+            raise ClientError({"Error": {"Code": "ConditionalCheckFailedException"}}, "DeleteItem")
+        self.items.pop(key, None)
+
+    def update_item(self, Key, UpdateExpression, ExpressionAttributeNames=None, ExpressionAttributeValues=None):
+        item = self.items[self._key(Key, "UpdateItem")]
+        names = ExpressionAttributeNames or {}
+        values = ExpressionAttributeValues or {}
+        for action, body in re.findall(r"(SET|REMOVE)\s+(.*?)(?=\s+(?:SET|REMOVE)\s|$)", UpdateExpression):
+            for clause in body.split(","):
+                if action == "SET":
+                    path, placeholder = [p.strip() for p in clause.split("=")]
+                    item[names.get(path, path)] = copy.deepcopy(values[placeholder])
+                else:
+                    item.pop(names.get(clause.strip(), clause.strip()), None)
+
+
+@pytest.fixture
+def table():
+    fake = FakeTable()
+    with patch.object(service, "_table", lambda: fake):
+        yield fake
 
 
 @pytest.fixture(autouse=True)
@@ -17,262 +83,132 @@ def _authenticated():
     app.dependency_overrides.pop(get_current_user, None)
 
 
-client = TestClient(app)
+def _add(**fields):
+    return client.post("/api/shopping", json={"name": "Headphones", **fields}).json()
 
 
-# ── service-level helpers ────────────────────────────────────────────────────
+# ── the bug this table layout fixes ──────────────────────────────────────────
 
-def _make_dynamo_item(
-    item_id="abc-123",
-    user_id="user-1",
-    name="Headphones",
-    description="Noise cancelling",
-    price_min=None,
-    price_max=None,
-    url="https://example.com",
-    purchased=False,
-    created_at="2026-06-29",
-):
-    item = {
-        "item_id": item_id,
-        "user_id": user_id,
-        "name": name,
-        "description": description,
-        "url": url,
-        "purchased": purchased,
-        "created_at": created_at,
-    }
-    if price_min is not None:
-        item["price_min"] = Decimal(str(price_min))
-    if price_max is not None:
-        item["price_max"] = Decimal(str(price_max))
-    return item
+def test_user_can_have_many_items(table):
+    for name in ("Headphones", "Keyboard", "Monitor"):
+        assert client.post("/api/shopping", json={"name": name}).status_code == 201
+    names = [i["name"] for i in client.get("/api/shopping").json()]
+    assert sorted(names) == ["Headphones", "Keyboard", "Monitor"]
 
 
-def _mock_table(items=None, get_item=None):
-    table = MagicMock()
-    table.scan.return_value = {"Items": items or []}
-    if get_item is not None:
-        table.get_item.return_value = {"Item": get_item}
-    return table
+def test_delete_removes_only_that_item(table):
+    a = _add(name="A")
+    _add(name="B")
+    assert client.delete(f"/api/shopping/{a['item_id']}").status_code == 204
+    assert [i["name"] for i in client.get("/api/shopping").json()] == ["B"]
 
 
-# ── service unit tests ───────────────────────────────────────────────────────
-
-@patch("app.shopping.service._table")
-def test_list_items_empty(mock_table_fn):
-    mock_table_fn.return_value = _mock_table([])
-    from app.shopping.service import list_items
-    assert list_items("user-1") == []
+def test_delete_missing_item_returns_404(table):
+    assert client.delete("/api/shopping/no-such-id").status_code == 404
 
 
-@patch("app.shopping.service._table")
-def test_list_items_returns_sorted_by_created_at(mock_table_fn):
-    items = [
-        _make_dynamo_item(item_id="b", name="B", created_at="2026-06-29"),
-        _make_dynamo_item(item_id="a", name="A", created_at="2026-06-28"),
-    ]
-    mock_table_fn.return_value = _mock_table(items)
-    from app.shopping.service import list_items
-    result = list_items("user-1")
-    assert result[0]["item_id"] == "a"
-    assert result[1]["item_id"] == "b"
+def test_items_are_private_to_their_owner(table):
+    item = _add()
+    app.dependency_overrides[get_current_user] = lambda: OTHER_USER
+    assert client.get("/api/shopping").json() == []
+    assert client.delete(f"/api/shopping/{item['item_id']}").status_code == 404
+    assert client.post(f"/api/shopping/{item['item_id']}/toggle").status_code == 404
+    assert client.patch(f"/api/shopping/{item['item_id']}", json={"name": "Mine"}).status_code == 404
+    assert len(table.items) == 1
 
 
-@patch("app.shopping.service._table")
-def test_list_items_serializes_price(mock_table_fn):
-    items = [_make_dynamo_item(price_min=10, price_max=50)]
-    mock_table_fn.return_value = _mock_table(items)
-    from app.shopping.service import list_items
-    result = list_items("user-1")
-    assert result[0]["price_min"] == 10.0
-    assert result[0]["price_max"] == 50.0
-
-
-@patch("app.shopping.service._table")
-def test_list_items_no_price_returns_none(mock_table_fn):
-    items = [_make_dynamo_item()]
-    mock_table_fn.return_value = _mock_table(items)
-    from app.shopping.service import list_items
-    result = list_items("user-1")
-    assert result[0]["price_min"] is None
-    assert result[0]["price_max"] is None
-
-
-@patch("app.shopping.service._table")
-def test_create_item_puts_to_dynamo(mock_table_fn):
-    table = _mock_table()
-    mock_table_fn.return_value = table
-    from app.shopping.service import create_item
-    result = create_item("user-1", "Keyboard", "Mechanical", 80.0, 150.0, "https://shop.com")
-    table.put_item.assert_called_once()
-    call_item = table.put_item.call_args[1]["Item"]
-    assert call_item["name"] == "Keyboard"
-    assert call_item["user_id"] == "user-1"
-    assert call_item["description"] == "Mechanical"
-    assert float(call_item["price_min"]) == 80.0
-    assert float(call_item["price_max"]) == 150.0
-    assert call_item["url"] == "https://shop.com"
-    assert call_item["purchased"] is False
-    assert result["purchased"] is False
-
-
-@patch("app.shopping.service._table")
-def test_create_item_without_price(mock_table_fn):
-    table = _mock_table()
-    mock_table_fn.return_value = table
-    from app.shopping.service import create_item
-    result = create_item("user-1", "Book")
-    assert result["price_min"] is None
-    assert result["price_max"] is None
-    call_item = table.put_item.call_args[1]["Item"]
-    assert "price_min" not in call_item
-    assert "price_max" not in call_item
-
-
-@patch("app.shopping.service._table")
-def test_toggle_purchased_true_to_false(mock_table_fn):
-    dynamo_item = _make_dynamo_item(purchased=True)
-    table = _mock_table(get_item=dynamo_item)
-    mock_table_fn.return_value = table
-    from app.shopping.service import toggle_purchased
-    result = toggle_purchased("user-1", "abc-123")
-    assert result["purchased"] is False
-    table.update_item.assert_called_once()
-
-
-@patch("app.shopping.service._table")
-def test_toggle_purchased_false_to_true(mock_table_fn):
-    dynamo_item = _make_dynamo_item(purchased=False)
-    table = _mock_table(get_item=dynamo_item)
-    mock_table_fn.return_value = table
-    from app.shopping.service import toggle_purchased
-    result = toggle_purchased("user-1", "abc-123")
-    assert result["purchased"] is True
-
-
-@patch("app.shopping.service._table")
-def test_toggle_purchased_not_found(mock_table_fn):
-    table = MagicMock()
-    table.get_item.return_value = {}
-    mock_table_fn.return_value = table
-    from app.shopping.service import toggle_purchased
-    with pytest.raises(ValueError, match="not found"):
-        toggle_purchased("user-1", "missing-id")
-
-
-@patch("app.shopping.service._table")
-def test_toggle_purchased_wrong_owner(mock_table_fn):
-    dynamo_item = _make_dynamo_item(user_id="someone-else")
-    table = _mock_table(get_item=dynamo_item)
-    mock_table_fn.return_value = table
-    from app.shopping.service import toggle_purchased
-    with pytest.raises(ValueError, match="not found"):
-        toggle_purchased("user-1", "abc-123")
-
-
-@patch("app.shopping.service._table")
-def test_delete_item_calls_dynamo(mock_table_fn):
-    table = _mock_table(get_item=_make_dynamo_item())
-    mock_table_fn.return_value = table
-    from app.shopping.service import delete_item
-    delete_item("user-1", "abc-123")
-    table.delete_item.assert_called_once_with(Key={"item_id": "abc-123"})
-
-
-@patch("app.shopping.service._table")
-def test_delete_item_wrong_owner_raises(mock_table_fn):
-    table = _mock_table(get_item=_make_dynamo_item(user_id="someone-else"))
-    mock_table_fn.return_value = table
-    from app.shopping.service import delete_item
-    with pytest.raises(ValueError, match="not found"):
-        delete_item("user-1", "abc-123")
-    table.delete_item.assert_not_called()
-
-
-# ── API / router tests ───────────────────────────────────────────────────────
+# ── create / list ────────────────────────────────────────────────────────────
 
 def test_shopping_requires_auth():
     app.dependency_overrides.pop(get_current_user, None)
-    res = client.get("/api/shopping")
-    assert res.status_code == 401
-    app.dependency_overrides[get_current_user] = lambda: TEST_USER
+    assert client.get("/api/shopping").status_code == 401
 
 
-@patch("app.shopping.service._table")
-def test_get_shopping_returns_list(mock_table_fn):
-    items = [_make_dynamo_item()]
-    mock_table_fn.return_value = _mock_table(items)
-    res = client.get("/api/shopping")
-    assert res.status_code == 200
-    data = res.json()
-    assert len(data) == 1
-    assert data[0]["name"] == "Headphones"
-    assert data[0]["url"] == "https://example.com"
+def test_list_empty(table):
+    assert client.get("/api/shopping").json() == []
 
 
-@patch("app.shopping.service._table")
-def test_post_shopping_creates_item(mock_table_fn):
-    table = _mock_table()
-    mock_table_fn.return_value = table
+def test_list_sorted_by_created_at(table):
+    table.put_item(Item={"user_id": "user-1", "item_id": "b", "name": "B", "created_at": "2026-06-29"})
+    table.put_item(Item={"user_id": "user-1", "item_id": "a", "name": "A", "created_at": "2026-06-28"})
+    assert [i["item_id"] for i in client.get("/api/shopping").json()] == ["a", "b"]
+
+
+def test_create_full_item(table):
     res = client.post("/api/shopping", json={
-        "name": "Monitor",
-        "description": "4K display",
-        "price_min": 200.0,
-        "price_max": 400.0,
-        "url": "https://monitor.com",
+        "name": " Monitor ", "description": "4K display", "price_min": 200, "price_max": 400, "url": "https://monitor.com",
     })
     assert res.status_code == 201
     data = res.json()
     assert data["name"] == "Monitor"
-    assert data["price_min"] == 200.0
-    assert data["price_max"] == 400.0
+    assert (data["price_min"], data["price_max"]) == (200.0, 400.0)
     assert data["purchased"] is False
+    stored = next(iter(table.items.values()))
+    assert stored["user_id"] == "user-1"
+    assert stored["price_min"] == Decimal("200")
 
 
-@patch("app.shopping.service._table")
-def test_post_shopping_minimal(mock_table_fn):
-    table = _mock_table()
-    mock_table_fn.return_value = table
-    res = client.post("/api/shopping", json={"name": "Coffee"})
-    assert res.status_code == 201
-    data = res.json()
-    assert data["name"] == "Coffee"
-    assert data["price_min"] is None
-    assert data["price_max"] is None
-    assert data["url"] == ""
+def test_create_minimal_item_has_no_prices(table):
+    data = _add(name="Coffee")
+    assert (data["price_min"], data["price_max"], data["url"]) == (None, None, "")
+    assert "price_min" not in next(iter(table.items.values()))
 
 
-@patch("app.shopping.service._table")
-def test_post_shopping_missing_name_returns_422(mock_table_fn):
-    mock_table_fn.return_value = _mock_table()
-    res = client.post("/api/shopping", json={"description": "no name"})
-    assert res.status_code == 422
+@pytest.mark.parametrize("body", [
+    {"description": "no name"},
+    {"name": "   "},
+    {"name": "X", "price_min": -1},
+    {"name": "X", "price_min": 50, "price_max": 10},
+])
+def test_create_rejects_invalid_input(table, body):
+    assert client.post("/api/shopping", json=body).status_code == 422
 
 
-@patch("app.shopping.service._table")
-def test_toggle_endpoint_success(mock_table_fn):
-    dynamo_item = _make_dynamo_item(purchased=False)
-    table = _mock_table(get_item=dynamo_item)
-    mock_table_fn.return_value = table
-    res = client.post("/api/shopping/abc-123/toggle")
+# ── toggle ───────────────────────────────────────────────────────────────────
+
+def test_toggle_flips_purchased(table):
+    item = _add()
+    assert client.post(f"/api/shopping/{item['item_id']}/toggle").json()["purchased"] is True
+    assert client.post(f"/api/shopping/{item['item_id']}/toggle").json()["purchased"] is False
+
+
+def test_toggle_missing_returns_404(table):
+    assert client.post("/api/shopping/no-such-id/toggle").status_code == 404
+
+
+# ── edit ─────────────────────────────────────────────────────────────────────
+
+def test_edit_changes_given_fields_only(table):
+    item = _add(description="Noise cancelling", price_min=100, price_max=300, url="https://a.com")
+    res = client.patch(f"/api/shopping/{item['item_id']}", json={"name": "Better headphones", "price_max": 250})
     assert res.status_code == 200
-    assert res.json()["purchased"] is True
+    data = res.json()
+    assert data["name"] == "Better headphones"
+    assert data["description"] == "Noise cancelling"
+    assert (data["price_min"], data["price_max"]) == (100.0, 250.0)
+    assert data["url"] == "https://a.com"
+    assert client.get("/api/shopping").json()[0] == data
 
 
-@patch("app.shopping.service._table")
-def test_toggle_endpoint_not_found(mock_table_fn):
-    table = MagicMock()
-    table.get_item.return_value = {}
-    mock_table_fn.return_value = table
-    res = client.post("/api/shopping/no-such-id/toggle")
-    assert res.status_code == 404
+def test_edit_null_price_clears_it(table):
+    item = _add(price_min=10, price_max=20)
+    data = client.patch(f"/api/shopping/{item['item_id']}", json={"price_min": None, "price_max": None}).json()
+    assert (data["price_min"], data["price_max"]) == (None, None)
+    assert "price_min" not in next(iter(table.items.values()))
 
 
-@patch("app.shopping.service._table")
-def test_delete_endpoint_returns_204(mock_table_fn):
-    table = _mock_table(get_item=_make_dynamo_item())
-    mock_table_fn.return_value = table
-    res = client.delete("/api/shopping/abc-123")
-    assert res.status_code == 204
-    table.delete_item.assert_called_once_with(Key={"item_id": "abc-123"})
+def test_edit_keeps_purchased_state(table):
+    item = _add()
+    client.post(f"/api/shopping/{item['item_id']}/toggle")
+    data = client.patch(f"/api/shopping/{item['item_id']}", json={"description": "Wireless"}).json()
+    assert data["purchased"] is True
+
+
+@pytest.mark.parametrize("body", [{"name": ""}, {"price_min": 50, "price_max": 10}, {"price_max": -5}])
+def test_edit_rejects_invalid_input(table, body):
+    item = _add()
+    assert client.patch(f"/api/shopping/{item['item_id']}", json=body).status_code == 422
+
+
+def test_edit_missing_returns_404(table):
+    assert client.patch("/api/shopping/no-such-id", json={"name": "X"}).status_code == 404

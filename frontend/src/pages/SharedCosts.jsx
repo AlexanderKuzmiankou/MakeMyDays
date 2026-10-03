@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { motion } from 'framer-motion'
-import { ArrowRight, ChevronLeft, Pencil, Plus, Receipt, Repeat, Trash2, UserPlus, Users, X } from 'lucide-react'
+import { ArrowRight, Camera, ChevronLeft, Pencil, Plus, Receipt, Repeat, Trash2, UserPlus, Users, X } from 'lucide-react'
 import GlassCard from '../components/GlassCard.jsx'
 import EmptyState from '../components/EmptyState.jsx'
 import PageTransition from '../components/PageTransition.jsx'
@@ -8,6 +8,7 @@ import AvatarCircle from '../components/AvatarCircle.jsx'
 import { api } from '../api.js'
 import { useAuth } from '../auth/AuthContext.jsx'
 import { todayStr } from '../utils.js'
+import { fileToAvatarDataUrl } from '../avatar.js'
 
 const DEFAULT_CURRENCY = 'EUR'
 const CURRENCIES = ['EUR', 'USD', 'GBP', 'CHF', 'PLN', 'CZK', 'SEK', 'NOK', 'DKK', 'HUF', 'RON', 'UAH', 'JPY', 'CAD', 'AUD']
@@ -85,24 +86,106 @@ function StatChip({ tone, label, value }) {
     neutral: 'bg-[var(--surf-2)] text-[var(--text-2)]',
   }
   return (
-    <div className={`flex items-baseline gap-1.5 rounded-lg px-2.5 py-1.5 ${tones[tone]}`}>
-      <span className="text-[11px] uppercase tracking-wide opacity-80">{label}</span>
-      <span className="text-[13.5px] font-semibold font-mono">{value}</span>
+    // Stacked on phones so a row of chips fits; inline from sm up.
+    <div
+      className={`flex-1 sm:flex-none min-w-0 flex flex-col sm:flex-row sm:items-baseline gap-0.5 sm:gap-1.5 rounded-lg px-2.5 py-1.5 ${tones[tone]}`}
+    >
+      <span className="text-[10px] sm:text-[11px] uppercase tracking-wide opacity-80 truncate">{label}</span>
+      <span className="text-[13px] sm:text-[13.5px] font-semibold font-mono truncate">{value}</span>
+    </div>
+  )
+}
+
+function GroupAvatar({ group, size = 36 }) {
+  const style = { width: size, height: size }
+  if (group.avatar_url) {
+    return <img src={group.avatar_url} alt={group.name} className="rounded-lg object-cover shrink-0" style={style} />
+  }
+  return (
+    <div className="rounded-lg bg-accent-500/15 flex items-center justify-center shrink-0" style={style}>
+      <Users size={Math.round(size * 0.42)} className="text-accent-400" />
+    </div>
+  )
+}
+
+// Click to upload a group picture; the small × removes it.
+function EditableGroupAvatar({ group, onChange, onError, size = 40 }) {
+  const [busy, setBusy] = useState(false)
+
+  const save = async (avatar_url) => {
+    setBusy(true)
+    try {
+      onChange(await api.sharedCosts.updateGroup(group.group_id, { avatar_url }))
+    } catch (err) {
+      onError(err.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const pick = async (e) => {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file) return
+    try {
+      await save(await fileToAvatarDataUrl(file))
+    } catch (err) {
+      onError(err.message)
+    }
+  }
+
+  return (
+    <div className="relative shrink-0 group/avatar">
+      <label title="Change group picture" className={`block cursor-pointer ${busy ? 'opacity-50 pointer-events-none' : ''}`}>
+        <GroupAvatar group={group} size={size} />
+        <span className="absolute inset-0 rounded-lg bg-black/45 flex items-center justify-center text-white opacity-0 group-hover/avatar:opacity-100 transition-opacity">
+          <Camera size={15} />
+        </span>
+        <input type="file" accept="image/*" onChange={pick} className="hidden" />
+      </label>
+      {group.avatar_url && !busy && (
+        <button
+          onClick={() => save('')}
+          title="Remove group picture"
+          className="absolute -top-1.5 -right-1.5 w-[18px] h-[18px] rounded-full flex items-center justify-center bg-[var(--surf-2)] border border-[var(--border)] text-[var(--text-3)] hover:text-red-400 sm:opacity-0 sm:group-hover/avatar:opacity-100 transition-all"
+        >
+          <X size={10} />
+        </button>
+      )}
+    </div>
+  )
+}
+
+// Overlapping member avatars, e.g. in the group list.
+function MemberStack({ members, max = 4, size = 18 }) {
+  const shown = members.slice(0, max)
+  const extra = members.length - shown.length
+  return (
+    <div className="flex items-center">
+      {shown.map((m, i) => (
+        <AvatarCircle
+          key={m.user_id}
+          user={{ ...m, name: m.name || m.email }}
+          size={size}
+          className={`ring-2 ring-[var(--surf)] ${i > 0 ? '-ml-1.5' : ''}`}
+        />
+      ))}
+      {extra > 0 && <span className="ml-1 text-[11px] text-[var(--text-3)]">+{extra}</span>}
     </div>
   )
 }
 
 // Compact page header shared by the overview and a group. In a group it acts
 // as a breadcrumb ("Shared Costs › Group") with the way back on the left.
-function PageHeader({ group, onBack, chips, actions }) {
+function PageHeader({ group, onBack, onGroupChanged, onError, chips, actions }) {
   return (
     <motion.section
-      className="glass rounded-2xl px-5 py-4"
+      className="glass rounded-2xl px-4 py-3 sm:px-5 sm:py-4"
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3 }}
     >
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-3">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2.5 sm:gap-y-3">
         {group ? (
           <div className="flex items-center gap-3 min-w-0 flex-1">
             <button
@@ -112,6 +195,7 @@ function PageHeader({ group, onBack, chips, actions }) {
             >
               <ChevronLeft size={18} />
             </button>
+            <EditableGroupAvatar group={group} onChange={onGroupChanged} onError={onError} />
             <div className="min-w-0">
               <button
                 onClick={onBack}
@@ -119,18 +203,18 @@ function PageHeader({ group, onBack, chips, actions }) {
               >
                 Shared Costs
               </button>
-              <span className="text-[11.5px] text-[var(--text-3)]"> › {group.members.length} {group.members.length === 1 ? 'member' : 'members'}</span>
+              <span className="hidden sm:inline text-[11.5px] text-[var(--text-3)]"> › {group.members.length} {group.members.length === 1 ? 'member' : 'members'}</span>
               <h1 className="text-[20px] leading-tight font-semibold font-serif truncate">{group.name}</h1>
             </div>
           </div>
         ) : (
           <div className="min-w-0 flex-1">
             <h1 className="text-[20px] leading-tight font-semibold font-serif">Shared Costs</h1>
-            <div className="text-[12px] text-[var(--text-3)]">Split group expenses and settle up</div>
+            <div className="hidden sm:block text-[12px] text-[var(--text-3)]">Split group expenses and settle up</div>
           </div>
         )}
-        {chips && <div className="flex flex-wrap gap-2">{chips}</div>}
-        {actions}
+        {actions && <div className="shrink-0 sm:order-last">{actions}</div>}
+        {chips && <div className="w-full sm:w-auto flex flex-wrap gap-2">{chips}</div>}
       </div>
     </motion.section>
   )
@@ -197,6 +281,28 @@ function NewGroupForm({ onCreated }) {
   )
 }
 
+// The current user's net position in a group, e.g. "+€50.00 / you're owed".
+function GroupBalance({ balance }) {
+  const entries = Object.entries(balance).filter(([, v]) => v !== 0)
+  if (entries.length === 0) {
+    return <div className="text-[12px] text-[var(--text-3)] shrink-0">settled</div>
+  }
+  return (
+    <div className="flex flex-col items-end shrink-0">
+      {entries.map(([currency, amount]) => (
+        <div key={currency} className={`text-[13px] font-mono font-medium ${amount < 0 ? 'text-red-400' : 'text-emerald-400'}`}>
+          {fmtMoney(amount, currency, { signed: true })}
+        </div>
+      ))}
+      {entries.length === 1 && (
+        <div className={`text-[11px] ${entries[0][1] < 0 ? 'text-red-400' : 'text-emerald-400'}`}>
+          {entries[0][1] < 0 ? 'you owe' : "you're owed"}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function Overview({ data, people, currentUserId, onOpenGroup, onGroupCreated }) {
   // Sum per currency so different currencies are never added together.
   const owed = {}
@@ -232,19 +338,16 @@ function Overview({ data, people, currentUserId, onOpenGroup, onGroupCreated }) 
                 className="flex items-center justify-between gap-3 rounded-xl bg-[var(--surf)] border border-[var(--border)] px-3.5 py-3 text-left hover:border-accent-400 transition-all"
               >
                 <div className="flex items-center gap-3 min-w-0">
-                  <div className="w-9 h-9 rounded-lg bg-accent-500/15 flex items-center justify-center shrink-0">
-                    <Users size={15} className="text-accent-400" />
-                  </div>
+                  <GroupAvatar group={g} size={38} />
                   <div className="min-w-0">
                     <div className="text-[13.5px] font-medium text-[var(--text-1)] truncate">{g.name}</div>
-                    <div className="text-[11.5px] text-[var(--text-3)]">
-                      {g.members.length} {g.members.length === 1 ? 'person' : 'people'} · {g.currency}
+                    <div className="flex items-center gap-1.5 mt-0.5 text-[11.5px] text-[var(--text-3)]">
+                      <MemberStack members={g.members} />
+                      <span>· {g.currency}</span>
                     </div>
                   </div>
                 </div>
-                <div className="text-[13px] font-mono text-[var(--text-2)] shrink-0">
-                  {fmtTotals(g.totals || {})}
-                </div>
+                <GroupBalance balance={g.balance || {}} />
               </button>
             ))}
             <NewGroupForm onCreated={onGroupCreated} />
@@ -265,7 +368,7 @@ function Overview({ data, people, currentUserId, onOpenGroup, onGroupCreated }) 
                     className="flex items-center justify-between py-2.5 border-b border-[var(--border)] last:border-b-0"
                   >
                     <div className="flex items-center gap-2.5 min-w-0">
-                      <AvatarCircle user={{ name: person.name || person.email }} size={26} />
+                      <AvatarCircle user={{ ...person, name: person.name || person.email }} size={26} />
                       <span className="text-[13.5px] text-[var(--text-1)] truncate">{person.name || person.email}</span>
                     </div>
                     <div className={`text-[13px] font-mono font-medium shrink-0 ${b.amount < 0 ? 'text-red-400' : 'text-emerald-400'}`}>
@@ -328,8 +431,10 @@ function ExpenseRow({ expense: e, people, currentUserId, groupName, onEdit, onDe
             {e.description}
           </div>
           <div className="text-[11.5px] text-[var(--text-3)] mt-0.5">
-            {payer?.name || payer?.email || 'Someone'} paid · split {e.split_between.length}{' '}
-            {e.split_between.length === 1 ? 'way' : 'ways'}
+            {payer?.name || payer?.email || 'Someone'} paid ·{' '}
+            {e.split_between.includes(e.paid_by)
+              ? `split ${e.split_between.length} ${e.split_between.length === 1 ? 'way' : 'ways'}`
+              : 'owed in full'}
             {groupName ? ` · ${groupName}` : ''} · {e.date}
           </div>
         </div>
@@ -395,6 +500,21 @@ function AddMemberForm({ groupId, onAdded }) {
   )
 }
 
+const SPLIT_MODES = [
+  { value: 'equal', label: 'Split equally' },
+  { value: 'owed', label: "You're owed full" },
+  { value: 'owe', label: 'You owe full' },
+]
+
+// Which split option an existing expense corresponds to, from your point of view.
+function detectSplitMode(expense, currentUserId) {
+  const { paid_by: payer, split_between: split } = expense
+  if (split.includes(payer)) return 'equal'
+  if (payer === currentUserId) return 'owed'
+  if (split.length === 1 && split[0] === currentUserId) return 'owe'
+  return 'equal'
+}
+
 // Creates a one-off or recurring expense, or edits an existing one when
 // `expense` is given (a single occurrence, so the repeat options are hidden).
 function ExpenseForm({ group, currentUserId, expense, onSaved, onCancel }) {
@@ -422,14 +542,32 @@ function ExpenseForm({ group, currentUserId, expense, onSaved, onCancel }) {
           endDate: '',
         },
   )
+  const others = (uid) => group.members.map((m) => m.user_id).filter((id) => id !== uid)
+  const [splitMode, setSplitMode] = useState(() => (editing ? detectSplitMode(expense, currentUserId) : 'equal'))
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
   const set = (patch) => setForm((f) => ({ ...f, ...patch }))
 
+  const splitBetween =
+    splitMode === 'owed' ? form.split.filter((id) => id !== currentUserId)
+    : splitMode === 'owe' ? [currentUserId]
+    : form.split
+
   const toggleSplit = (uid) =>
     set({ split: form.split.includes(uid) ? form.split.filter((id) => id !== uid) : [...form.split, uid] })
 
-  const valid = form.description.trim() && parseFloat(form.amount) > 0 && form.split.length > 0
+  const changeSplitMode = (mode) => {
+    setSplitMode(mode)
+    if (mode === 'equal') {
+      set({ split: group.members.map((m) => m.user_id) })
+    } else if (mode === 'owed') {
+      set({ paidBy: currentUserId, split: others(currentUserId) })
+    } else {
+      set({ paidBy: form.paidBy !== currentUserId ? form.paidBy : others(currentUserId)[0], split: [currentUserId] })
+    }
+  }
+
+  const valid = form.description.trim() && parseFloat(form.amount) > 0 && splitBetween.length > 0
 
   const submit = async (e) => {
     e.preventDefault()
@@ -441,7 +579,7 @@ function ExpenseForm({ group, currentUserId, expense, onSaved, onCancel }) {
       amount: parseFloat(form.amount),
       currency: form.currency,
       paid_by: form.paidBy,
-      split_between: form.split,
+      split_between: splitBetween,
     }
     try {
       if (editing) {
@@ -490,36 +628,69 @@ function ExpenseForm({ group, currentUserId, expense, onSaved, onCancel }) {
           className={`w-32 ${inputCls}`}
         />
         <CurrencySelect value={form.currency} onChange={(currency) => set({ currency })} />
-        <select value={form.paidBy} onChange={(e) => set({ paidBy: e.target.value })} className={`flex-1 min-w-[140px] ${inputCls}`}>
-          {group.members.map((m) => (
-            <option key={m.user_id} value={m.user_id}>
-              Paid by {m.user_id === currentUserId ? 'you' : m.name || m.email}
-            </option>
-          ))}
-        </select>
+        {splitMode !== 'owed' && (
+          <select value={form.paidBy} onChange={(e) => set({ paidBy: e.target.value })} className={`flex-1 min-w-[140px] ${inputCls}`}>
+            {group.members
+              .filter((m) => splitMode !== 'owe' || m.user_id !== currentUserId)
+              .map((m) => (
+                <option key={m.user_id} value={m.user_id}>
+                  Paid by {m.user_id === currentUserId ? 'you' : m.name || m.email}
+                </option>
+              ))}
+          </select>
+        )}
       </div>
 
       <div>
-        <div className="text-[11.5px] text-[var(--text-3)] mb-1.5">Split equally between</div>
-        <div className="flex flex-wrap gap-1.5">
-          {group.members.map((m) => {
-            const on = form.split.includes(m.user_id)
-            return (
+        {group.members.length > 1 && (
+          <div className="flex sm:inline-flex mb-2 p-0.5 rounded-lg bg-[var(--surf-2)] border border-[var(--border)]">
+            {SPLIT_MODES.map((opt) => (
               <button
                 type="button"
-                key={m.user_id}
-                onClick={() => toggleSplit(m.user_id)}
-                className={`px-2.5 py-1 rounded-full text-[12px] border transition-all ${
-                  on
-                    ? 'bg-accent-500/15 border-accent-400 text-accent-400'
-                    : 'border-[var(--border)] text-[var(--text-3)] hover:text-[var(--text-2)]'
+                key={opt.value}
+                onClick={() => changeSplitMode(opt.value)}
+                className={`flex-1 sm:flex-none px-2.5 sm:px-3 py-1 rounded-md text-[12px] leading-tight transition-all ${
+                  splitMode === opt.value ? 'bg-accent-500 text-white' : 'text-[var(--text-3)] hover:text-[var(--text-2)]'
                 }`}
               >
-                {m.user_id === currentUserId ? 'You' : m.name || m.email}
+                {opt.label}
               </button>
-            )
-          })}
-        </div>
+            ))}
+          </div>
+        )}
+        {splitMode === 'owe' ? (
+          <div className="text-[12px] text-[var(--text-2)]">
+            You owe {group.members.find((m) => m.user_id === form.paidBy)?.name || 'them'} the full amount.
+          </div>
+        ) : (
+          <>
+            <div className="text-[11.5px] text-[var(--text-3)] mb-1.5">
+              {splitMode === 'owed' ? 'Owed to you in full by' : 'Split equally between'}
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {group.members
+                .filter((m) => splitMode !== 'owed' || m.user_id !== currentUserId)
+                .map((m) => {
+                  const on = form.split.includes(m.user_id)
+                  return (
+                    <button
+                      type="button"
+                      key={m.user_id}
+                      onClick={() => toggleSplit(m.user_id)}
+                      className={`flex items-center gap-1.5 pl-1 pr-2.5 py-1 rounded-full text-[12px] border transition-all ${
+                        on
+                          ? 'bg-accent-500/15 border-accent-400 text-accent-400'
+                          : 'border-[var(--border)] text-[var(--text-3)] hover:text-[var(--text-2)]'
+                      }`}
+                    >
+                      <AvatarCircle user={m} size={18} className={on ? '' : 'opacity-50'} />
+                      {m.user_id === currentUserId ? 'You' : m.name || m.email}
+                    </button>
+                  )
+                })}
+            </div>
+          </>
+        )}
       </div>
 
       <div className="flex flex-wrap gap-2 items-center">
@@ -634,6 +805,8 @@ function GroupDetail({ group, currentUserId, onBack, onGroupChanged }) {
       <PageHeader
         group={group}
         onBack={onBack}
+        onGroupChanged={onGroupChanged}
+        onError={setError}
         chips={
           balances &&
           (myEntries.length === 0 ? (
@@ -651,7 +824,7 @@ function GroupDetail({ group, currentUserId, onBack, onGroupChanged }) {
         }
         actions={
           <label className="flex items-center gap-2 text-[11.5px] text-[var(--text-3)]" title="Used for new expenses in this group">
-            Currency
+            <span className="hidden sm:inline">Currency</span>
             <CurrencySelect value={group.currency} onChange={changeCurrency} className="!py-1.5 !text-[13px]" />
           </label>
         }
@@ -664,7 +837,7 @@ function GroupDetail({ group, currentUserId, onBack, onGroupChanged }) {
           <div className="flex flex-col">
             {group.members.map((m) => (
               <div key={m.user_id} className="flex items-center gap-2.5 py-2 border-b border-[var(--border)] last:border-b-0">
-                <AvatarCircle user={{ name: m.name || m.email }} size={26} />
+                <AvatarCircle user={{ ...m, name: m.name || m.email }} size={30} />
                 <div className="min-w-0">
                   <div className="text-[13.5px] text-[var(--text-1)] truncate">
                     {m.name || m.email}
@@ -690,10 +863,14 @@ function GroupDetail({ group, currentUserId, onBack, onGroupChanged }) {
                 c.settlements.map((s) => (
                   <div
                     key={`${c.currency}-${s.from}-${s.to}`}
-                    className="flex items-center justify-between py-2.5 border-b border-[var(--border)] last:border-b-0"
+                    className="flex items-center justify-between gap-3 py-2.5 border-b border-[var(--border)] last:border-b-0"
                   >
-                    <div className="text-[13.5px] text-[var(--text-1)] truncate">
-                      {nameOf(s.from)} <ArrowRight size={12} className="inline text-[var(--text-3)]" /> {nameOf(s.to)}
+                    <div className="flex items-center gap-1.5 min-w-0 text-[13.5px] text-[var(--text-1)]">
+                      <AvatarCircle user={{ ...people[s.from], name: people[s.from]?.name || people[s.from]?.email }} size={22} />
+                      <span className="truncate">{nameOf(s.from)}</span>
+                      <ArrowRight size={12} className="shrink-0 text-[var(--text-3)]" />
+                      <AvatarCircle user={{ ...people[s.to], name: people[s.to]?.name || people[s.to]?.email }} size={22} />
+                      <span className="truncate">{nameOf(s.to)}</span>
                     </div>
                     <div
                       className={`text-[13px] font-mono font-medium shrink-0 ${
@@ -871,7 +1048,7 @@ export default function SharedCosts() {
           currentUserId={user?.user_id}
           onOpenGroup={setOpenGroupId}
           onGroupCreated={(group) => {
-            setData((d) => ({ ...d, groups: [...d.groups, { ...group, totals: {} }] }))
+            setData((d) => ({ ...d, groups: [...d.groups, { ...group, totals: {}, balance: {} }] }))
             setOpenGroupId(group.group_id)
           }}
         />
