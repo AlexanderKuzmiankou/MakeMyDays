@@ -37,6 +37,7 @@ export const api = {
   habits: {
     list: () => request('/api/habits'),
     create: (habit) => request('/api/habits', { method: 'POST', body: JSON.stringify(habit) }),
+    update: (id, patch) => request(`/api/habits/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
     toggle: (id, date) => request(`/api/habits/${id}/toggle`, { method: 'POST', body: JSON.stringify({ date }) }),
     remove: (id) => request(`/api/habits/${id}`, { method: 'DELETE' }),
   },

@@ -51,8 +51,14 @@ class FakeTable:
             raise ClientError({"Error": {"Code": "ConditionalCheckFailedException"}}, "DeleteItem")
         self.items.pop(key, None)
 
-    def update_item(self, Key, UpdateExpression, ExpressionAttributeValues):
+    def update_item(self, Key, UpdateExpression, ExpressionAttributeValues, ExpressionAttributeNames=None):
         item = self.items[self._key(Key, "UpdateItem")]
+        if UpdateExpression.startswith("SET "):
+            names = ExpressionAttributeNames or {}
+            for clause in UpdateExpression[4:].split(","):
+                path, placeholder = [p.strip() for p in clause.split("=")]
+                item[names.get(path, path)] = copy.deepcopy(ExpressionAttributeValues[placeholder])
+            return
         action, attr, placeholder = UpdateExpression.split()
         current = set(item.get(attr, set()))
         current = current | ExpressionAttributeValues[placeholder] if action == "ADD" else current - ExpressionAttributeValues[placeholder]
@@ -184,3 +190,35 @@ def test_toggle_rejects_bad_date(table):
 
 def test_toggle_missing_returns_404(table):
     assert client.post("/api/habits/no-such-id/toggle", json={"date": _day(0)}).status_code == 404
+
+
+# ── edit ─────────────────────────────────────────────────────────────────────
+
+def test_edit_changes_given_fields_and_keeps_history(table):
+    habit = _add(emoji="📚", goal_streak=30)
+    client.post(f"/api/habits/{habit['habit_id']}/toggle", json={"date": _day(0)})
+
+    res = client.patch(f"/api/habits/{habit['habit_id']}", json={"name": "Read 20 pages", "emoji": "🧘‍♀️"})
+    assert res.status_code == 200
+    data = res.json()
+    assert (data["name"], data["emoji"], data["goal_streak"]) == ("Read 20 pages", "🧘‍♀️", 30)
+    assert (data["completions"], data["current_streak"]) == ([_day(0)], 1)
+    assert client.get("/api/habits").json()[0] == data
+
+
+def test_edit_goal(table):
+    habit = _add()
+    assert client.patch(f"/api/habits/{habit['habit_id']}", json={"goal_streak": 66}).json()["goal_streak"] == 66
+
+
+@pytest.mark.parametrize("body", [{"name": " "}, {"emoji": ""}, {"goal_streak": 0}, {"name": "x" * 41}])
+def test_edit_rejects_invalid_input(table, body):
+    habit = _add()
+    assert client.patch(f"/api/habits/{habit['habit_id']}", json=body).status_code == 422
+
+
+def test_edit_missing_or_foreign_habit_returns_404(table):
+    habit = _add()
+    assert client.patch("/api/habits/no-such-id", json={"name": "X"}).status_code == 404
+    app.dependency_overrides[get_current_user] = lambda: OTHER_USER
+    assert client.patch(f"/api/habits/{habit['habit_id']}", json={"name": "Mine"}).status_code == 404

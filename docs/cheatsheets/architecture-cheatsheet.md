@@ -111,6 +111,7 @@ Services raise `ValueError`, routers translate that into `404` / `409` / `401`. 
 | GET | `/api/briefing` | no | Claude briefing (currently placeholder) |
 | GET | `/api/briefing/audio` | no | MP3 via Polly, streamed |
 | GET / POST | `/api/habits` | yes | list / create |
+| PATCH | `/api/habits/{id}` | yes | edit `name` / `emoji` / `goal_streak`; omitted fields unchanged |
 | POST | `/api/habits/{id}/toggle` | yes | body `{date: "YYYY-MM-DD"}` |
 | DELETE | `/api/habits/{id}` | yes | `204` |
 | GET / POST | `/api/shopping` | yes | list / create |

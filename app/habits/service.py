@@ -24,6 +24,13 @@ def _key(user_id: str, habit_id: str) -> dict:
     return {"user_id": user_id, "habit_id": habit_id}
 
 
+def _get_owned(user_id: str, habit_id: str) -> dict:
+    item = _table().get_item(Key=_key(user_id, habit_id)).get("Item")
+    if not item:
+        raise ValueError(f"Habit {habit_id} not found")
+    return item
+
+
 def _calculate_current_streak(completions: set[str]) -> int:
     check = date.today()
     # Today not ticked yet: a streak running up to yesterday is still alive.
@@ -76,11 +83,40 @@ def create_habit(user_id: str, name: str, emoji: str = "⭐", goal_streak: int =
     return _serialize(record)
 
 
+def update_habit(
+    user_id: str,
+    habit_id: str,
+    name: str | None = None,
+    emoji: str | None = None,
+    goal_streak: int | None = None,
+) -> dict:
+    """Edit fields; None keeps the current value. Completions are untouched."""
+    item = _get_owned(user_id, habit_id)
+
+    updates: dict = {}
+    if name is not None and name.strip():
+        updates["name"] = name.strip()
+    if emoji is not None and emoji.strip():
+        updates["emoji"] = emoji.strip()
+    if goal_streak is not None:
+        updates["goal_streak"] = goal_streak
+
+    if updates:
+        # "name" is a DynamoDB reserved word, so alias every attribute.
+        _table().update_item(
+            Key=_key(user_id, habit_id),
+            UpdateExpression="SET " + ", ".join(f"#{k} = :{k}" for k in updates),
+            ExpressionAttributeNames={f"#{k}": k for k in updates},
+            ExpressionAttributeValues={f":{k}": v for k, v in updates.items()},
+        )
+        item.update(updates)
+
+    return _serialize(item)
+
+
 def toggle_completion(user_id: str, habit_id: str, date_str: str) -> dict:
     table = _table()
-    item = table.get_item(Key=_key(user_id, habit_id)).get("Item")
-    if not item:
-        raise ValueError(f"Habit {habit_id} not found")
+    item = _get_owned(user_id, habit_id)
 
     completions: set[str] = set(item.get("completions", []))
     if date_str in completions:
