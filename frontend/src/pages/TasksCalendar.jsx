@@ -21,6 +21,7 @@ import GlassCard from '../components/GlassCard.jsx'
 import Badge from '../components/Badge.jsx'
 import EmptyState from '../components/EmptyState.jsx'
 import PageTransition from '../components/PageTransition.jsx'
+import PageHero from '../components/PageHero.jsx'
 import { api } from '../api.js'
 import { useAuth } from '../auth/AuthContext.jsx'
 import { addDays, dateStr, dueInfo, greeting, parseDate, todayStr } from '../utils.js'
@@ -133,16 +134,6 @@ function fmtLongDate(str) {
 
 // ── header ───────────────────────────────────────────────────────────────────
 
-function SummaryTile({ label, value, hint, tone = 'text-[var(--text-1)]' }) {
-  return (
-    <div className="min-w-0 rounded-xl bg-[var(--surf)] border border-[var(--border)] px-3 py-2.5 sm:px-4 sm:py-3">
-      <div className="text-[10px] sm:text-[11px] font-semibold uppercase tracking-wider text-[var(--text-3)] truncate">{label}</div>
-      <div className={`mt-0.5 text-[16px] sm:text-[20px] leading-tight font-semibold font-serif truncate ${tone}`}>{value}</div>
-      {hint && <div className="text-[11px] text-[var(--text-3)] truncate">{hint}</div>}
-    </div>
-  )
-}
-
 function Header({ tasks, todayEvents, today }) {
   const { user } = useAuth()
   const firstName = user?.name?.split(' ')[0]
@@ -154,62 +145,29 @@ function Header({ tasks, todayEvents, today }) {
   const now = nowHHMM()
   const next = todayEvents?.find((e) => !e.all_day && eventStatus(e, today, now) !== 'past')
   const total = tasks?.length ?? 0
-  const progress = total ? Math.round((done.length / total) * 100) : 0
 
   return (
-    <motion.section
-      className="glass rounded-2xl relative overflow-hidden p-5 sm:p-7"
-      initial={{ opacity: 0, y: 8 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.35 }}
-    >
-      <div className="pointer-events-none absolute -top-24 -right-20 w-72 h-72 rounded-full bg-accent-500/15 blur-3xl" />
-      <div className="pointer-events-none absolute -bottom-28 -left-16 w-60 h-60 rounded-full bg-sky-500/10 blur-3xl" />
-
-      <div className="relative flex items-center gap-3.5">
-        <div className="w-11 h-11 sm:w-12 sm:h-12 rounded-xl bg-gradient-to-br from-accent-400 to-accent-500 flex items-center justify-center shrink-0 shadow-lg shadow-accent-500/20">
-          <CalendarCheck2 size={20} className="text-white" />
-        </div>
-        <div className="min-w-0">
-          <h1 className="text-[22px] sm:text-[28px] leading-tight font-semibold font-serif truncate">
-            {greeting()}{firstName ? `, ${firstName}` : ''}
-          </h1>
-          <p className="text-[12.5px] sm:text-[14px] text-[var(--text-2)]">{fmtLongDate(today)}</p>
-        </div>
-      </div>
-
-      <div className="relative grid grid-cols-3 gap-2 sm:gap-3 mt-5">
-        <SummaryTile
-          label="Open tasks"
-          value={tasks ? open.length : '–'}
-          hint={overdue ? `${overdue} overdue` : dueToday ? `${dueToday} due today` : 'nothing urgent'}
-          tone={overdue ? 'text-red-400' : 'text-accent-400'}
-        />
-        <SummaryTile
-          label="Today"
-          value={todayEvents ? `${todayEvents.length} ${todayEvents.length === 1 ? 'event' : 'events'}` : '–'}
-          hint={next ? `next ${next.start_time} ${next.title}` : todayEvents?.length ? 'nothing more today' : 'free day'}
-          tone="text-sky-400"
-        />
-        <SummaryTile label="Done" value={tasks ? done.length : '–'} hint="completed tasks" tone="text-emerald-400" />
-      </div>
-
-      {total > 0 && (
-        <div className="relative mt-4">
-          <div className="h-1.5 rounded-full bg-[var(--surf-2)] overflow-hidden">
-            <motion.div
-              className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-emerald-400"
-              initial={{ width: 0 }}
-              animate={{ width: `${progress}%` }}
-              transition={{ duration: 0.5 }}
-            />
-          </div>
-          <div className="mt-1.5 text-[11.5px] text-[var(--text-3)]">
-            {done.length} of {total} tasks done
-          </div>
-        </div>
-      )}
-    </motion.section>
+    <PageHero
+      icon={CalendarCheck2}
+      title={`${greeting()}${firstName ? `, ${firstName}` : ''}`}
+      subtitle={fmtLongDate(today)}
+      tiles={[
+        {
+          label: 'Open tasks',
+          value: tasks ? open.length : '–',
+          hint: overdue ? `${overdue} overdue` : dueToday ? `${dueToday} due today` : 'nothing urgent',
+          tone: overdue ? 'text-red-400' : 'text-accent-400',
+        },
+        {
+          label: 'Today',
+          value: todayEvents ? `${todayEvents.length} ${todayEvents.length === 1 ? 'event' : 'events'}` : '–',
+          hint: next ? `next ${next.start_time} ${next.title}` : todayEvents?.length ? 'nothing more today' : 'free day',
+          tone: 'text-sky-400',
+        },
+        { label: 'Done', value: tasks ? done.length : '–', hint: 'completed tasks', tone: 'text-emerald-400' },
+      ]}
+      progress={total > 0 && { pct: Math.round((done.length / total) * 100), label: `${done.length} of ${total} tasks done` }}
+    />
   )
 }
 

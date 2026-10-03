@@ -55,11 +55,21 @@ export const api = {
   },
 
   shopping: {
-    list: () => request('/api/shopping'),
-    create: (item) => request('/api/shopping', { method: 'POST', body: JSON.stringify(item) }),
-    update: (id, patch) => request(`/api/shopping/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
-    toggle: (id) => request(`/api/shopping/${id}/toggle`, { method: 'POST' }),
-    remove: (id) => request(`/api/shopping/${id}`, { method: 'DELETE' }),
+    lists: () => request('/api/shopping/lists'),
+    createList: (name) => request('/api/shopping/lists', { method: 'POST', body: JSON.stringify({ name }) }),
+    renameList: (listId, name) =>
+      request(`/api/shopping/lists/${listId}`, { method: 'PATCH', body: JSON.stringify({ name }) }),
+    deleteList: (listId) => request(`/api/shopping/lists/${listId}`, { method: 'DELETE' }),
+    addMember: (listId, email) =>
+      request(`/api/shopping/lists/${listId}/members`, { method: 'POST', body: JSON.stringify({ email }) }),
+    leaveList: (listId) => request(`/api/shopping/lists/${listId}/leave`, { method: 'POST' }),
+    items: (listId) => request(`/api/shopping/lists/${listId}/items`),
+    createItem: (listId, item) =>
+      request(`/api/shopping/lists/${listId}/items`, { method: 'POST', body: JSON.stringify(item) }),
+    updateItem: (listId, id, patch) =>
+      request(`/api/shopping/lists/${listId}/items/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+    toggle: (listId, id) => request(`/api/shopping/lists/${listId}/items/${id}/toggle`, { method: 'POST' }),
+    removeItem: (listId, id) => request(`/api/shopping/lists/${listId}/items/${id}`, { method: 'DELETE' }),
   },
 
   sharedCosts: {

@@ -1,7 +1,7 @@
-import { motion } from 'framer-motion'
-import { ArrowDownRight, ArrowUpRight, Wallet } from 'lucide-react'
+import { Wallet } from 'lucide-react'
 import GlassCard from '../components/GlassCard.jsx'
 import PageTransition from '../components/PageTransition.jsx'
+import PageHero from '../components/PageHero.jsx'
 
 // TODO: replace with real data from GET /api/budget/summary once the backend endpoint exists.
 const MOCK_SUMMARY = { income: 3200, expenses: 2140, balance: 1060 }
@@ -19,48 +19,24 @@ function fmt(n) {
   return `${sign}€${Math.abs(n).toLocaleString()}`
 }
 
+const eur = (n) => `€${n.toLocaleString()}`
+
 export default function Budget() {
+  const spentPct = Math.round((MOCK_SUMMARY.expenses / MOCK_SUMMARY.income) * 100)
   return (
     <PageTransition>
-      <motion.section
-        className="glass rounded-2xl p-7 md:p-9"
-        initial={{ opacity: 0, y: 8 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.35 }}
-      >
-        <h1 className="text-[26px] md:text-[28px] font-semibold tracking-normal font-serif mb-1.5">Budget</h1>
-        <p className="text-[14px] text-[var(--text-2)]">Skeleton page — mock data until the budget API ships</p>
-      </motion.section>
-
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <GlassCard className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-emerald-500/15 flex items-center justify-center shrink-0">
-            <ArrowUpRight size={18} className="text-emerald-400" />
-          </div>
-          <div>
-            <div className="text-[11px] uppercase tracking-wide text-[var(--text-3)]">Income</div>
-            <div className="text-[19px] font-bold text-[var(--text-1)]">€{MOCK_SUMMARY.income.toLocaleString()}</div>
-          </div>
-        </GlassCard>
-        <GlassCard className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-red-500/15 flex items-center justify-center shrink-0">
-            <ArrowDownRight size={18} className="text-red-400" />
-          </div>
-          <div>
-            <div className="text-[11px] uppercase tracking-wide text-[var(--text-3)]">Expenses</div>
-            <div className="text-[19px] font-bold text-[var(--text-1)]">€{MOCK_SUMMARY.expenses.toLocaleString()}</div>
-          </div>
-        </GlassCard>
-        <GlassCard className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-accent-500/15 flex items-center justify-center shrink-0">
-            <Wallet size={18} className="text-accent-400" />
-          </div>
-          <div>
-            <div className="text-[11px] uppercase tracking-wide text-[var(--text-3)]">Balance</div>
-            <div className="text-[19px] font-bold text-[var(--text-1)]">€{MOCK_SUMMARY.balance.toLocaleString()}</div>
-          </div>
-        </GlassCard>
-      </div>
+      <PageHero
+        icon={Wallet}
+        theme="amber"
+        title="Budget"
+        subtitle="Sample data until the budget API ships"
+        tiles={[
+          { label: 'Income', value: eur(MOCK_SUMMARY.income), hint: 'this month', tone: 'text-emerald-400' },
+          { label: 'Expenses', value: eur(MOCK_SUMMARY.expenses), hint: 'this month', tone: 'text-red-400' },
+          { label: 'Balance', value: eur(MOCK_SUMMARY.balance), hint: 'left to spend', tone: 'text-accent-400' },
+        ]}
+        progress={{ pct: spentPct, label: `${spentPct}% of income spent` }}
+      />
 
       <GlassCard>
         <div className="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-3)] mb-4">

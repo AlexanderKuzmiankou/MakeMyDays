@@ -4,6 +4,7 @@ import { Check, Pencil, Plus, Sprout, Trash2 } from 'lucide-react'
 import GlassCard from '../components/GlassCard.jsx'
 import EmptyState from '../components/EmptyState.jsx'
 import PageTransition from '../components/PageTransition.jsx'
+import PageHero from '../components/PageHero.jsx'
 import { api } from '../api.js'
 import { dateStr, last7Days, todayStr } from '../utils.js'
 
@@ -14,77 +15,37 @@ function isDone(habit, date) {
   return habit.completions.includes(date)
 }
 
-function SummaryTile({ label, value, hint, tone = 'text-[var(--text-1)]' }) {
-  return (
-    <div className="min-w-0 rounded-xl bg-[var(--surf)] border border-[var(--border)] px-3 py-2.5 sm:px-4 sm:py-3">
-      <div className="text-[10px] sm:text-[11px] font-semibold uppercase tracking-wider text-[var(--text-3)] truncate">{label}</div>
-      <div className={`mt-0.5 text-[16px] sm:text-[20px] leading-tight font-semibold font-serif truncate ${tone}`}>{value}</div>
-      {hint && <div className="text-[11px] text-[var(--text-3)] truncate">{hint}</div>}
-    </div>
-  )
-}
-
 function Header({ habits, days, today }) {
   const total = habits?.length ?? 0
   const doneToday = habits?.filter((h) => isDone(h, today)).length ?? 0
   const best = habits?.reduce((top, h) => (!top || h.current_streak > top.current_streak ? h : top), null)
   const weekDone = habits?.reduce((n, h) => n + days.filter((d) => isDone(h, dateStr(d))).length, 0) ?? 0
   const weekPct = total ? Math.round((weekDone / (total * days.length)) * 100) : 0
-  const progress = total ? Math.round((doneToday / total) * 100) : 0
   const allDone = total > 0 && doneToday === total
 
   return (
-    <motion.section
-      className="glass rounded-2xl relative overflow-hidden p-5 sm:p-7"
-      initial={{ opacity: 0, y: 8 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.35 }}
-    >
-      <div className="pointer-events-none absolute -top-24 -right-20 w-72 h-72 rounded-full bg-emerald-500/15 blur-3xl" />
-      <div className="pointer-events-none absolute -bottom-28 -left-16 w-60 h-60 rounded-full bg-accent-500/10 blur-3xl" />
-
-      <div className="relative flex items-center gap-3.5">
-        <div className="w-11 h-11 sm:w-12 sm:h-12 rounded-xl bg-gradient-to-br from-emerald-400 to-emerald-600 flex items-center justify-center shrink-0 shadow-lg shadow-emerald-500/20">
-          <Sprout size={20} className="text-white" />
-        </div>
-        <div className="min-w-0">
-          <h1 className="text-[22px] sm:text-[28px] leading-tight font-semibold font-serif">Habits</h1>
-          <p className="text-[12.5px] sm:text-[14px] text-[var(--text-2)]">Build momentum, one day at a time</p>
-        </div>
-      </div>
-
-      <div className="relative grid grid-cols-3 gap-2 sm:gap-3 mt-5">
-        <SummaryTile
-          label="Today"
-          value={habits ? `${doneToday}/${total}` : '–'}
-          hint={allDone ? 'all done 🎉' : 'done'}
-          tone="text-emerald-400"
-        />
-        <SummaryTile
-          label="Best streak"
-          value={best?.current_streak ? `🔥 ${best.current_streak}d` : '–'}
-          hint={best?.current_streak ? best.name : 'no streak yet'}
-          tone="text-amber-400"
-        />
-        <SummaryTile label="This week" value={habits ? `${weekPct}%` : '–'} hint={`${weekDone} check-ins`} tone="text-accent-400" />
-      </div>
-
-      {total > 0 && (
-        <div className="relative mt-4">
-          <div className="h-1.5 rounded-full bg-[var(--surf-2)] overflow-hidden">
-            <motion.div
-              className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-emerald-400"
-              initial={{ width: 0 }}
-              animate={{ width: `${progress}%` }}
-              transition={{ duration: 0.5 }}
-            />
-          </div>
-          <div className="mt-1.5 text-[11.5px] text-[var(--text-3)]">
-            {allDone ? 'Every habit done today — nice!' : `${total - doneToday} left for today`}
-          </div>
-        </div>
-      )}
-    </motion.section>
+    <PageHero
+      icon={Sprout}
+      theme="emerald"
+      title="Habits"
+      subtitle="Build momentum, one day at a time"
+      tiles={[
+        { label: 'Today', value: habits ? `${doneToday}/${total}` : '–', hint: allDone ? 'all done 🎉' : 'done', tone: 'text-emerald-400' },
+        {
+          label: 'Best streak',
+          value: best?.current_streak ? `🔥 ${best.current_streak}d` : '–',
+          hint: best?.current_streak ? best.name : 'no streak yet',
+          tone: 'text-amber-400',
+        },
+        { label: 'This week', value: habits ? `${weekPct}%` : '–', hint: `${weekDone} check-ins`, tone: 'text-accent-400' },
+      ]}
+      progress={
+        total > 0 && {
+          pct: Math.round((doneToday / total) * 100),
+          label: allDone ? 'Every habit done today — nice!' : `${total - doneToday} left for today`,
+        }
+      }
+    />
   )
 }
 

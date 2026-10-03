@@ -119,10 +119,13 @@ Services raise `ValueError`, routers translate that into `404` / `409` / `401`. 
 | PATCH | `/api/habits/{id}` | yes | edit `name` / `emoji` / `goal_streak`; omitted fields unchanged |
 | POST | `/api/habits/{id}/toggle` | yes | body `{date: "YYYY-MM-DD"}` |
 | DELETE | `/api/habits/{id}` | yes | `204` |
-| GET / POST | `/api/shopping` | yes | list / create |
-| PATCH | `/api/shopping/{id}` | yes | edit; omitted fields unchanged, `null` price clears it |
-| POST | `/api/shopping/{id}/toggle` | yes | flips `purchased` |
-| DELETE | `/api/shopping/{id}` | yes | `204` |
+| GET / POST | `/api/shopping/lists` | yes | your lists (with members + item counts) / create |
+| PATCH / DELETE | `/api/shopping/lists/{list_id}` | yes | rename / delete with its items (creator only, else `403`) |
+| POST | `/api/shopping/lists/{list_id}/members` | yes | share by email (must have an account) |
+| POST | `/api/shopping/lists/{list_id}/leave` | yes | leave a shared list (`400` for the last member) |
+| GET / POST | `/api/shopping/lists/{list_id}/items` | yes | list / create |
+| PATCH / DELETE | `/api/shopping/lists/{list_id}/items/{id}` | yes | edit (`null` price clears it) / delete |
+| POST | `/api/shopping/lists/{list_id}/items/{id}/toggle` | yes | flips `purchased` |
 
 Interactive docs while running locally: `http://localhost:8000/docs`.
 
@@ -165,7 +168,8 @@ next request -> read cookie -> verify HMAC signature -> check exp
 | `makemydays-user-tasks` | `user_id` + sort key `task_id` | `title`, `notes`, `due`, `completed`, `completed_at`, `created_at` | `query` by `user_id` |
 | `makemydays-user-events` | `user_id` + sort key `event_id` | `title`, `date`, `start_time`/`end_time` (HH:MM, absent = all-day), `location`, `notes` | `query` by `user_id`, date range filtered in the app |
 | `makemydays-user-habits` | `user_id` + sort key `habit_id` | `name`, `emoji`, `goal_streak`, `completions` (string set), `created_at` | `query` by `user_id`; habits addressed by `(user_id, habit_id)` |
-| `makemydays-shopping-items` | `user_id` + sort key `item_id` | `name`, `description`, `url`, `price_min/max`, `purchased`, `created_at` | `query` by `user_id`; items addressed by `(user_id, item_id)` |
+| `makemydays-shopping-lists` | `list_id` | `name`, `created_by`, `member_ids` (string set), `members` (map user_id -> name/email) | `scan` with `contains(member_ids, user_id)` |
+| `makemydays-shopping-list-items` | `list_id` + sort key `item_id` | `name`, `description`, `url`, `price_min/max`, `purchased`, `added_by`, `created_at` | `query` by `list_id` after a membership check |
 | `makemydays-shared-groups` | `group_id` | `name`, `currency` (ISO code, default `EUR`), `member_ids` (string set), `members` (map user_id -> name/email), `created_by` | `scan` with `contains(member_ids, user_id)` |
 | `makemydays-shared-expenses` | `expense_id` | `group_id`, `description`, `amount`, `currency`, `paid_by`, `split_between` (list), `date`, `recurring_id` (if generated) | `scan` filtered by `group_id` |
 | `makemydays-shared-recurring` | `recurring_id` | `group_id`, `description`, `amount`, `currency`, `paid_by`, `split_between`, `frequency` (weekly/monthly/yearly), `start_date`, `end_date`, `occurrences` | `scan` filtered by `group_id` |

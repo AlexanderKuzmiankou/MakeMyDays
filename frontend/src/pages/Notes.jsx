@@ -1,7 +1,7 @@
-import { motion } from 'framer-motion'
 import { Plus, StickyNote } from 'lucide-react'
 import GlassCard from '../components/GlassCard.jsx'
 import PageTransition from '../components/PageTransition.jsx'
+import PageHero from '../components/PageHero.jsx'
 
 // TODO: replace with real data from GET /api/notes once the backend endpoint exists.
 const MOCK_NOTES = [
@@ -13,15 +13,16 @@ const MOCK_NOTES = [
 export default function Notes() {
   return (
     <PageTransition>
-      <motion.section
-        className="glass rounded-2xl p-7 md:p-9"
-        initial={{ opacity: 0, y: 8 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.35 }}
-      >
-        <h1 className="text-[26px] md:text-[28px] font-semibold tracking-normal font-serif mb-1.5">Notes</h1>
-        <p className="text-[14px] text-[var(--text-2)]">Skeleton page — mock data until the notes API ships</p>
-      </motion.section>
+      <PageHero
+        icon={StickyNote}
+        theme="violet"
+        title="Notes"
+        subtitle="Sample data until the notes API ships"
+        tiles={[
+          { label: 'Notes', value: MOCK_NOTES.length, hint: 'in total', tone: 'text-violet-400' },
+          { label: 'Last edited', value: MOCK_NOTES[0].updated, hint: MOCK_NOTES[0].title, tone: 'text-accent-400' },
+        ]}
+      />
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         {MOCK_NOTES.map((n) => (

@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
-import { motion } from 'framer-motion'
 import { ArrowRight, Camera, ChevronLeft, Pencil, Plus, Receipt, Repeat, Trash2, UserPlus, Users, X } from 'lucide-react'
 import GlassCard from '../components/GlassCard.jsx'
 import EmptyState from '../components/EmptyState.jsx'
 import PageTransition from '../components/PageTransition.jsx'
+import PageHero from '../components/PageHero.jsx'
 import AvatarCircle from '../components/AvatarCircle.jsx'
+import MemberStack from '../components/MemberStack.jsx'
 import { api } from '../api.js'
 import { useAuth } from '../auth/AuthContext.jsx'
 import { todayStr } from '../utils.js'
@@ -79,23 +80,6 @@ function ErrorLine({ error }) {
   return <div className="text-[12px] text-red-400">{error}</div>
 }
 
-function StatChip({ tone, label, value }) {
-  const tones = {
-    good: 'bg-emerald-500/10 text-emerald-400',
-    bad: 'bg-red-500/10 text-red-400',
-    neutral: 'bg-[var(--surf-2)] text-[var(--text-2)]',
-  }
-  return (
-    // Stacked on phones so a row of chips fits; inline from sm up.
-    <div
-      className={`flex-1 sm:flex-none min-w-0 flex flex-col sm:flex-row sm:items-baseline gap-0.5 sm:gap-1.5 rounded-lg px-2.5 py-1.5 ${tones[tone]}`}
-    >
-      <span className="text-[10px] sm:text-[11px] uppercase tracking-wide opacity-80 truncate">{label}</span>
-      <span className="text-[13px] sm:text-[13.5px] font-semibold font-mono truncate">{value}</span>
-    </div>
-  )
-}
-
 function GroupAvatar({ group, size = 36 }) {
   const style = { width: size, height: size }
   if (group.avatar_url) {
@@ -156,67 +140,35 @@ function EditableGroupAvatar({ group, onChange, onError, size = 40 }) {
   )
 }
 
-// Overlapping member avatars, e.g. in the group list.
-function MemberStack({ members, max = 4, size = 18 }) {
-  const shown = members.slice(0, max)
-  const extra = members.length - shown.length
-  return (
-    <div className="flex items-center">
-      {shown.map((m, i) => (
-        <AvatarCircle
-          key={m.user_id}
-          user={{ ...m, name: m.name || m.email }}
-          size={size}
-          className={`ring-2 ring-[var(--surf)] ${i > 0 ? '-ml-1.5' : ''}`}
-        />
-      ))}
-      {extra > 0 && <span className="ml-1 text-[11px] text-[var(--text-3)]">+{extra}</span>}
-    </div>
-  )
-}
+const OVERVIEW_HERO = { icon: Users, theme: 'sky', title: 'Shared Costs', subtitle: 'Split group expenses and settle up' }
 
-// Compact page header shared by the overview and a group. In a group it acts
-// as a breadcrumb ("Shared Costs › Group") with the way back on the left.
-function PageHeader({ group, onBack, onGroupChanged, onError, chips, actions }) {
+// In a group the header doubles as a breadcrumb, with the way back on the left.
+function GroupHero({ group, onBack, onGroupChanged, onError, tiles, actions }) {
   return (
-    <motion.section
-      className="glass rounded-2xl px-4 py-3 sm:px-5 sm:py-4"
-      initial={{ opacity: 0, y: 8 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3 }}
-    >
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-2.5 sm:gap-y-3">
-        {group ? (
-          <div className="flex items-center gap-3 min-w-0 flex-1">
-            <button
-              onClick={onBack}
-              title="Back to all groups"
-              className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0 bg-[var(--surf-2)] border border-[var(--border)] text-[var(--text-2)] hover:text-accent-400 hover:border-accent-400 transition-all"
-            >
-              <ChevronLeft size={18} />
-            </button>
-            <EditableGroupAvatar group={group} onChange={onGroupChanged} onError={onError} />
-            <div className="min-w-0">
-              <button
-                onClick={onBack}
-                className="text-[11.5px] text-[var(--text-3)] hover:text-accent-400 transition-colors"
-              >
-                Shared Costs
-              </button>
-              <span className="hidden sm:inline text-[11.5px] text-[var(--text-3)]"> › {group.members.length} {group.members.length === 1 ? 'member' : 'members'}</span>
-              <h1 className="text-[20px] leading-tight font-semibold font-serif truncate">{group.name}</h1>
-            </div>
-          </div>
-        ) : (
-          <div className="min-w-0 flex-1">
-            <h1 className="text-[20px] leading-tight font-semibold font-serif">Shared Costs</h1>
-            <div className="hidden sm:block text-[12px] text-[var(--text-3)]">Split group expenses and settle up</div>
-          </div>
-        )}
-        {actions && <div className="shrink-0 sm:order-last">{actions}</div>}
-        {chips && <div className="w-full sm:w-auto flex flex-wrap gap-2">{chips}</div>}
-      </div>
-    </motion.section>
+    <PageHero
+      theme="sky"
+      leading={
+        <div className="flex items-center gap-2.5 shrink-0">
+          <button
+            onClick={onBack}
+            title="Back to all groups"
+            className="w-9 h-9 rounded-lg flex items-center justify-center bg-[var(--surf-2)] border border-[var(--border)] text-[var(--text-2)] hover:text-accent-400 hover:border-accent-400 transition-all"
+          >
+            <ChevronLeft size={18} />
+          </button>
+          <EditableGroupAvatar group={group} onChange={onGroupChanged} onError={onError} size={44} />
+        </div>
+      }
+      title={group.name}
+      subtitle={
+        <>
+          <button onClick={onBack} className="hover:text-accent-400 transition-colors">Shared Costs</button>
+          <span className="text-[var(--text-3)]"> › {group.members.length} {group.members.length === 1 ? 'member' : 'members'}</span>
+        </>
+      }
+      actions={actions}
+      tiles={tiles}
+    />
   )
 }
 
@@ -316,14 +268,23 @@ function Overview({ data, people, currentUserId, onOpenGroup, onGroupCreated }) 
 
   return (
     <>
-      <PageHeader
-        chips={
-          <>
-            <StatChip tone={Object.keys(owed).length ? 'good' : 'neutral'} label="You're owed" value={fmtTotals(owed)} />
-            <StatChip tone={Object.keys(owe).length ? 'bad' : 'neutral'} label="You owe" value={fmtTotals(owe)} />
-            <StatChip tone="neutral" label="Groups" value={data.groups.length} />
-          </>
-        }
+      <PageHero
+        {...OVERVIEW_HERO}
+        tiles={[
+          {
+            label: "You're owed",
+            value: fmtTotals(owed),
+            hint: Object.keys(owed).length ? 'across your groups' : 'nothing owed',
+            tone: Object.keys(owed).length ? 'text-emerald-400' : undefined,
+          },
+          {
+            label: 'You owe',
+            value: fmtTotals(owe),
+            hint: Object.keys(owe).length ? 'to settle up' : 'all square',
+            tone: Object.keys(owe).length ? 'text-red-400' : undefined,
+          },
+          { label: 'Groups', value: data.groups.length, hint: data.groups.length === 1 ? 'group' : 'groups', tone: 'text-sky-400' },
+        ]}
       />
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -799,29 +760,38 @@ function GroupDetail({ group, currentUserId, onBack, onGroupChanged }) {
     if (mine && mine.amount !== 0) myBalance[c.currency] = mine.amount
   }
   const myEntries = Object.entries(myBalance)
+  const allPositive = myEntries.every(([, v]) => v > 0)
+  const allNegative = myEntries.every(([, v]) => v < 0)
+
+  const spent = {}
+  for (const e of expenses || []) spent[e.currency] = (spent[e.currency] || 0) + e.amount
 
   return (
     <>
-      <PageHeader
+      <GroupHero
         group={group}
         onBack={onBack}
         onGroupChanged={onGroupChanged}
         onError={setError}
-        chips={
-          balances &&
-          (myEntries.length === 0 ? (
-            <StatChip tone="neutral" label="You" value="settled" />
-          ) : (
-            myEntries.map(([currency, amount]) => (
-              <StatChip
-                key={currency}
-                tone={amount > 0 ? 'good' : 'bad'}
-                label={amount > 0 ? "You're owed" : 'You owe'}
-                value={fmtMoney(amount, currency)}
-              />
-            ))
-          ))
-        }
+        tiles={[
+          {
+            label: 'Your balance',
+            value: !balances ? '–' : myEntries.length === 0 ? 'Settled' : myEntries.map(([c, v]) => fmtMoney(v, c, { signed: true })).join(' · '),
+            hint: !balances || myEntries.length === 0 ? 'all square' : allPositive ? "you're owed" : allNegative ? 'you owe' : 'per currency',
+            tone: myEntries.length === 0 ? undefined : allPositive ? 'text-emerald-400' : allNegative ? 'text-red-400' : undefined,
+          },
+          {
+            label: 'Spent',
+            value: expenses ? fmtTotals(spent) : '–',
+            hint: expenses ? `${expenses.length} ${expenses.length === 1 ? 'expense' : 'expenses'}` : '',
+            tone: 'text-sky-400',
+          },
+          {
+            label: 'Members',
+            value: group.members.length,
+            hint: group.members.length === 1 ? 'just you' : 'sharing costs',
+          },
+        ]}
         actions={
           <label className="flex items-center gap-2 text-[11.5px] text-[var(--text-3)]" title="Used for new expenses in this group">
             <span className="hidden sm:inline">Currency</span>
@@ -1016,7 +986,7 @@ export default function SharedCosts() {
     <PageTransition>
       {data === null && !error ? (
         <>
-          <PageHeader />
+          <PageHero {...OVERVIEW_HERO} />
           <GlassCard>
             <div className="flex flex-col gap-3 py-2">
               {[1, 2, 3].map((i) => <div key={i} className="skeleton-line" style={{ width: `${60 + i * 10}%` }} />)}
@@ -1025,7 +995,7 @@ export default function SharedCosts() {
         </>
       ) : error ? (
         <>
-          <PageHeader />
+          <PageHero {...OVERVIEW_HERO} />
           <GlassCard>
             <EmptyState title="Could not load shared costs." subtitle="Backend may be offline." />
           </GlassCard>
