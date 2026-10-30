@@ -54,6 +54,13 @@ export const api = {
     remove: (id) => request(`/api/habits/${id}`, { method: 'DELETE' }),
   },
 
+  notes: {
+    list: () => request('/api/notes'),
+    create: (note) => request('/api/notes', { method: 'POST', body: JSON.stringify(note) }),
+    update: (id, patch) => request(`/api/notes/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+    remove: (id) => request(`/api/notes/${id}`, { method: 'DELETE' }),
+  },
+
   shopping: {
     lists: () => request('/api/shopping/lists'),
     createList: (name) => request('/api/shopping/lists', { method: 'POST', body: JSON.stringify({ name }) }),
@@ -70,6 +77,26 @@ export const api = {
       request(`/api/shopping/lists/${listId}/items/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
     toggle: (listId, id) => request(`/api/shopping/lists/${listId}/items/${id}/toggle`, { method: 'POST' }),
     removeItem: (listId, id) => request(`/api/shopping/lists/${listId}/items/${id}`, { method: 'DELETE' }),
+  },
+
+  budget: {
+    overview: (year, month) =>
+      request(`/api/budget/overview?${new URLSearchParams(month ? { year, month } : { year })}`),
+    updateSettings: (patch) => request('/api/budget/settings', { method: 'PATCH', body: JSON.stringify(patch) }),
+    createCategory: (category) => request('/api/budget/categories', { method: 'POST', body: JSON.stringify(category) }),
+    updateCategory: (id, patch) =>
+      request(`/api/budget/categories/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+    removeCategory: (id) => request(`/api/budget/categories/${id}`, { method: 'DELETE' }),
+    createTransaction: (tx) => request('/api/budget/transactions', { method: 'POST', body: JSON.stringify(tx) }),
+    updateTransaction: (id, patch) =>
+      request(`/api/budget/transactions/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+    removeTransaction: (id) => request(`/api/budget/transactions/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+    createRecurring: (rec) => request('/api/budget/recurring', { method: 'POST', body: JSON.stringify(rec) }),
+    updateRecurring: (id, patch) =>
+      request(`/api/budget/recurring/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+    removeRecurring: (id) => request(`/api/budget/recurring/${id}`, { method: 'DELETE' }),
+    setCap: (period, cap) => request(`/api/budget/caps/${period}`, { method: 'PUT', body: JSON.stringify(cap) }),
+    removeCap: (period) => request(`/api/budget/caps/${period}`, { method: 'DELETE' }),
   },
 
   sharedCosts: {

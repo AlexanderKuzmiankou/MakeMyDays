@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { Check, Pencil, Plus, Sprout, Trash2 } from 'lucide-react'
+import { CalendarDays, Check, ChevronLeft, ChevronRight, Pencil, Plus, Sprout, Trash2 } from 'lucide-react'
 import GlassCard from '../components/GlassCard.jsx'
 import EmptyState from '../components/EmptyState.jsx'
 import PageTransition from '../components/PageTransition.jsx'
 import PageHero from '../components/PageHero.jsx'
 import { api } from '../api.js'
-import { dateStr, last7Days, todayStr } from '../utils.js'
+import { addDays, dateStr, last7Days, todayStr } from '../utils.js'
 
 const inputCls =
   'bg-[var(--surf-2)] border border-[var(--border)] rounded-lg px-3 py-2 text-[14px] outline-none focus:border-accent-400 placeholder:text-[var(--text-3)]'
@@ -162,7 +162,7 @@ function EmojiPicker({ value, onChange }) {
 // icon; from sm up it sits right-aligned in front of the row actions.
 
 const stripPlacementCls = 'order-last sm:order-none w-full sm:w-auto pl-12 sm:pl-0'
-const actionsCls = 'w-14 shrink-0 flex justify-end'
+const actionsCls = 'w-[84px] shrink-0 flex justify-end'
 const rowActionCls =
   'sm:opacity-0 sm:group-hover:opacity-100 focus:opacity-100 w-7 h-7 rounded-lg flex items-center justify-center text-[var(--text-3)] transition-all'
 
@@ -182,21 +182,15 @@ function DayLabels({ days }) {
   )
 }
 
-function HabitRow({ habit, days, today, onToggle, onEdit, onDelete }) {
+function HabitRow({ habit, days, today, historyOpen, onToggle, onHistory, onEdit, onDelete }) {
   const done = isDone(habit, today)
   const streak = habit.current_streak
   const goal = habit.goal_streak
 
   return (
-    <motion.div
-      layout
-      initial={{ opacity: 0, y: 6 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, height: 0 }}
-      className="group flex items-center flex-wrap sm:flex-nowrap gap-x-3 gap-y-2 py-3 border-b border-[var(--border)] last:border-b-0"
-    >
+    <div className="group flex items-center flex-wrap sm:flex-nowrap gap-x-3 gap-y-2 py-3">
       <button
-        onClick={() => onToggle(habit)}
+        onClick={() => onToggle(habit, today)}
         title={done ? 'Mark as not done today' : 'Mark as done today'}
         className={`w-9 h-9 rounded-xl border-[1.5px] flex items-center justify-center text-base shrink-0 transition-all ${
           done
@@ -228,24 +222,129 @@ function HabitRow({ habit, days, today, onToggle, onEdit, onDelete }) {
           const dn = isDone(habit, ds)
           const isToday = ds === today
           return (
-            <div
+            <button
               key={ds}
-              className={`w-5 h-5 rounded-md border transition-all ${
-                dn ? 'bg-emerald-500 border-transparent' : 'bg-[var(--surf)] border-[var(--border)]'
+              onClick={() => onToggle(habit, ds)}
+              className={`w-5 h-5 rounded-md border transition-all hover:scale-110 ${
+                dn ? 'bg-emerald-500 border-transparent' : 'bg-[var(--surf)] border-[var(--border)] hover:border-accent-400'
               } ${isToday && !dn ? 'border-accent-400 border-[1.5px]' : ''}`}
-              title={ds}
+              title={`${ds} — ${dn ? 'done, click to unmark' : 'click to mark done'}`}
             />
           )
         })}
       </div>
 
       <div className={actionsCls}>
+        <button
+          onClick={() => onHistory(habit)}
+          className={`${rowActionCls} hover:text-accent-400 hover:bg-accent-500/10 ${historyOpen ? '!opacity-100 text-accent-400' : ''}`}
+          title="Edit history"
+        >
+          <CalendarDays size={14} />
+        </button>
         <button onClick={() => onEdit(habit)} className={`${rowActionCls} hover:text-accent-400 hover:bg-accent-500/10`} title="Edit habit">
           <Pencil size={13} />
         </button>
         <button onClick={() => onDelete(habit)} className={`${rowActionCls} hover:text-red-400 hover:bg-red-500/10`} title="Remove habit">
           <Trash2 size={14} />
         </button>
+      </div>
+    </div>
+  )
+}
+
+// Month calendar for editing past check-ins. Weeks start on Monday; days
+// after today can't be ticked.
+function HabitHistory({ habit, today, onToggle, onClose }) {
+  const [month, setMonth] = useState(() => {
+    const d = new Date()
+    return new Date(d.getFullYear(), d.getMonth(), 1)
+  })
+  const thisMonth = new Date()
+  const atCurrentMonth = month.getFullYear() === thisMonth.getFullYear() && month.getMonth() === thisMonth.getMonth()
+  const shiftMonth = (n) => setMonth((m) => new Date(m.getFullYear(), m.getMonth() + n, 1))
+
+  const lead = (month.getDay() + 6) % 7 // blank cells before the 1st (Mon = 0)
+  const daysInMonth = new Date(month.getFullYear(), month.getMonth() + 1, 0).getDate()
+  const cells = [
+    ...Array.from({ length: lead }, () => null),
+    ...Array.from({ length: daysInMonth }, (_, i) => addDays(month, i)),
+  ]
+  const monthPrefix = dateStr(month).slice(0, 7)
+  const doneThisMonth = habit.completions.filter((c) => c.startsWith(monthPrefix)).length
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, height: 0 }}
+      animate={{ opacity: 1, height: 'auto' }}
+      exit={{ opacity: 0, height: 0 }}
+      className="overflow-hidden"
+    >
+      <div className="my-2 p-4 rounded-xl bg-[var(--surf)] border border-accent-400">
+        <div className="flex items-center gap-2 mb-3">
+          <div className="flex-1 min-w-0">
+            <div className="text-[11px] font-semibold uppercase tracking-wider text-accent-400 truncate">
+              {habit.emoji} {habit.name} — history
+            </div>
+            <div className="text-[11px] text-[var(--text-3)]">Click a day to add or remove it · {doneThisMonth} this month</div>
+          </div>
+          <button
+            onClick={() => shiftMonth(-1)}
+            className="w-7 h-7 rounded-lg flex items-center justify-center text-[var(--text-2)] hover:bg-accent-500/10 hover:text-accent-400"
+            title="Previous month"
+          >
+            <ChevronLeft size={15} />
+          </button>
+          <div className="w-[110px] text-center text-[13px] font-medium">
+            {month.toLocaleDateString('en', { month: 'long', year: 'numeric' })}
+          </div>
+          <button
+            onClick={() => shiftMonth(1)}
+            disabled={atCurrentMonth}
+            className="w-7 h-7 rounded-lg flex items-center justify-center text-[var(--text-2)] hover:bg-accent-500/10 hover:text-accent-400 disabled:opacity-30 disabled:pointer-events-none"
+            title="Next month"
+          >
+            <ChevronRight size={15} />
+          </button>
+        </div>
+
+        <div className="grid grid-cols-7 gap-1 max-w-[320px] mx-auto">
+          {['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su'].map((d) => (
+            <div key={d} className="text-center text-[9px] font-semibold uppercase tracking-wide text-[var(--text-3)]">
+              {d}
+            </div>
+          ))}
+          {cells.map((d, i) => {
+            if (!d) return <div key={`blank-${i}`} />
+            const ds = dateStr(d)
+            const dn = isDone(habit, ds)
+            const future = ds > today
+            return (
+              <button
+                key={ds}
+                disabled={future}
+                onClick={() => onToggle(habit, ds)}
+                title={ds}
+                className={`aspect-square rounded-lg text-[12px] font-medium border transition-all ${
+                  dn
+                    ? 'bg-emerald-500 border-transparent text-white hover:bg-emerald-400'
+                    : 'bg-[var(--surf-2)] border-[var(--border)] text-[var(--text-2)] hover:border-accent-400 hover:text-accent-400'
+                } ${ds === today && !dn ? '!border-accent-400 border-[1.5px]' : ''} disabled:opacity-30 disabled:pointer-events-none`}
+              >
+                {d.getDate()}
+              </button>
+            )
+          })}
+        </div>
+
+        <div className="flex justify-end mt-3">
+          <button
+            onClick={onClose}
+            className="px-4 py-1.5 rounded-lg text-[13px] bg-[var(--surf-2)] border border-[var(--border)] text-[var(--text-2)] hover:text-[var(--text-1)] transition-all"
+          >
+            Done
+          </button>
+        </div>
       </div>
     </motion.div>
   )
@@ -333,6 +432,7 @@ export default function Habits() {
   const [error, setError] = useState(false)
   const [adding, setAdding] = useState(false)
   const [editingId, setEditingId] = useState(null)
+  const [historyId, setHistoryId] = useState(null)
   const [actionError, setActionError] = useState('')
 
   const days = last7Days()
@@ -346,14 +446,14 @@ export default function Habits() {
 
   const patchHabit = (id, patch) => setHabits((prev) => prev.map((h) => (h.habit_id === id ? { ...h, ...patch } : h)))
 
-  const toggle = async (habit) => {
+  const toggle = async (habit, ds) => {
     setActionError('')
-    const done = isDone(habit, today)
+    const done = isDone(habit, ds)
     patchHabit(habit.habit_id, {
-      completions: done ? habit.completions.filter((d) => d !== today) : [...habit.completions, today],
+      completions: done ? habit.completions.filter((d) => d !== ds) : [...habit.completions, ds],
     })
     try {
-      const data = await api.habits.toggle(habit.habit_id, today)
+      const data = await api.habits.toggle(habit.habit_id, ds)
       patchHabit(habit.habit_id, { completions: data.completions, current_streak: data.current_streak })
     } catch (err) {
       setActionError(err.message)
@@ -408,18 +508,34 @@ export default function Habits() {
                 h.habit_id === editingId ? (
                   <HabitForm key={h.habit_id} habit={h} onSave={(fields) => save(h.habit_id, fields)} onCancel={() => setEditingId(null)} />
                 ) : (
-                  <HabitRow
+                  <motion.div
                     key={h.habit_id}
-                    habit={h}
-                    days={days}
-                    today={today}
-                    onToggle={toggle}
-                    onEdit={(habit) => {
-                      setAdding(false)
-                      setEditingId(habit.habit_id)
-                    }}
-                    onDelete={remove}
-                  />
+                    layout
+                    initial={{ opacity: 0, y: 6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, height: 0 }}
+                    className="border-b border-[var(--border)] last:border-b-0"
+                  >
+                    <HabitRow
+                      habit={h}
+                      days={days}
+                      today={today}
+                      historyOpen={h.habit_id === historyId}
+                      onToggle={toggle}
+                      onHistory={(habit) => setHistoryId((id) => (id === habit.habit_id ? null : habit.habit_id))}
+                      onEdit={(habit) => {
+                        setAdding(false)
+                        setHistoryId(null)
+                        setEditingId(habit.habit_id)
+                      }}
+                      onDelete={remove}
+                    />
+                    <AnimatePresence initial={false}>
+                      {h.habit_id === historyId && (
+                        <HabitHistory habit={h} today={today} onToggle={toggle} onClose={() => setHistoryId(null)} />
+                      )}
+                    </AnimatePresence>
+                  </motion.div>
                 ),
               )}
             </AnimatePresence>
