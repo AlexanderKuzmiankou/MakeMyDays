@@ -45,7 +45,7 @@ flowchart LR
 3. Request reaches uvicorn on port `8000`.
 4. FastAPI matches routes **in registration order**:
    - `/metrics` (Prometheus instrumentator)
-   - `/api/auth/*`, `/api/events`, `/api/tasks`, `/api/briefing*`, `/api/habits*`, `/api/shopping*`
+   - `/api/auth/*`, `/api/events`, `/api/tasks`, `/api/briefing*`, `/api/habits*`, `/api/notes*`, `/api/shopping*`
    - `/assets/*` (static JS/CSS from `frontend/dist`)
    - `/health`
    - `/{full_path:path}` catch-all returns `index.html`, React Router takes over
@@ -69,6 +69,7 @@ app/
   briefing/            # Claude briefing, Polly audio
   planner/             # per-user tasks + schedule (appointments)
   habits/              # habit CRUD + streak logic
+  notes/               # notes made of text / list / table blocks
   shopping/            # shopping list CRUD
   notifications/       # Telegram sender
 frontend/              # React 18 + Vite + Tailwind + React Router
@@ -117,8 +118,10 @@ Services raise `ValueError`, routers translate that into `404` / `409` / `401`. 
 | GET | `/api/briefing/audio` | no | MP3 via Polly, streamed |
 | GET / POST | `/api/habits` | yes | list / create |
 | PATCH | `/api/habits/{id}` | yes | edit `name` / `emoji` / `goal_streak`; omitted fields unchanged |
-| POST | `/api/habits/{id}/toggle` | yes | body `{date: "YYYY-MM-DD"}` |
+| POST | `/api/habits/{id}/toggle` | yes | body `{date: "YYYY-MM-DD"}`; any past day (history edits), future days `422` (one day of time-zone slack) |
 | DELETE | `/api/habits/{id}` | yes | `204` |
+| GET / POST | `/api/notes` | yes | list (pinned first, then newest edit) / create `{title, blocks, pinned}` |
+| PATCH / DELETE | `/api/notes/{id}` | yes | edit (omitted fields unchanged, `blocks` replaced whole) / `204` |
 | GET / POST | `/api/shopping/lists` | yes | your lists (with members + item counts) / create |
 | PATCH / DELETE | `/api/shopping/lists/{list_id}` | yes | rename / delete with its items (creator only, else `403`) |
 | POST | `/api/shopping/lists/{list_id}/members` | yes | share by email (must have an account) |
@@ -129,7 +132,7 @@ Services raise `ValueError`, routers translate that into `404` / `409` / `401`. 
 
 Interactive docs while running locally: `http://localhost:8000/docs`.
 
-Frontend pages without a backend yet: **Budget, Shared Costs, Notes**.
+Frontend pages without a backend yet: **Budget, Shared Costs**.
 
 ---
 
@@ -168,11 +171,13 @@ next request -> read cookie -> verify HMAC signature -> check exp
 | `makemydays-user-tasks` | `user_id` + sort key `task_id` | `title`, `notes`, `due`, `completed`, `completed_at`, `created_at` | `query` by `user_id` |
 | `makemydays-user-events` | `user_id` + sort key `event_id` | `title`, `date`, `start_time`/`end_time` (HH:MM, absent = all-day), `location`, `notes` | `query` by `user_id`, date range filtered in the app |
 | `makemydays-user-habits` | `user_id` + sort key `habit_id` | `name`, `emoji`, `goal_streak`, `completions` (string set), `created_at` | `query` by `user_id`; habits addressed by `(user_id, habit_id)` |
+| `makemydays-user-notes` | `user_id` + sort key `note_id` | `title`, `pinned`, `blocks` (list of maps: `{type: text, text}`, `{type: list, checklist, items: [{text, checked}]}`, `{type: table, rows: [[str]]}`; first row is the header), `created_at`, `updated_at` | `query` by `user_id`; request body capped at 300 KB to stay under DynamoDB's 400 KB item limit |
 | `makemydays-shopping-lists` | `list_id` | `name`, `created_by`, `member_ids` (string set), `members` (map user_id -> name/email) | `scan` with `contains(member_ids, user_id)` |
 | `makemydays-shopping-list-items` | `list_id` + sort key `item_id` | `name`, `description`, `url`, `price_min/max`, `purchased`, `added_by`, `created_at` | `query` by `list_id` after a membership check |
 | `makemydays-shared-groups` | `group_id` | `name`, `currency` (ISO code, default `EUR`), `member_ids` (string set), `members` (map user_id -> name/email), `created_by` | `scan` with `contains(member_ids, user_id)` |
 | `makemydays-shared-expenses` | `expense_id` | `group_id`, `description`, `amount`, `currency`, `paid_by`, `split_between` (list), `date`, `recurring_id` (if generated) | `scan` filtered by `group_id` |
 | `makemydays-shared-recurring` | `recurring_id` | `group_id`, `description`, `amount`, `currency`, `paid_by`, `split_between`, `frequency` (weekly/monthly/yearly), `start_date`, `end_date`, `occurrences` | `scan` filtered by `group_id` |
+| `makemydays-user-budget` | `user_id` + sort key `item_id` | one partition per user, typed by `item_id` prefix: `SETTINGS` (`currency`), `CAT#<id>` (`name`, `kind` expense/income, `color`), `TX#<id>` (`kind`, `amount`, `category_id`, `description`, `date`, `recurring_id`), `REC#<id>` (`kind`, `amount`, `category_id`, `frequency` weekly/biweekly/monthly/quarterly/yearly, `start_date`, `end_date`, `occurrences`), `CAP#<period>` (`total`, `categories` map; period `YYYY-MM`, `YYYY`, `monthly` or `yearly`) | one `query` by `user_id` loads the whole budget; `begins_with(item_id, ...)` for a single type |
 
 DynamoDB gotchas already hit in this codebase:
 
@@ -183,6 +188,7 @@ DynamoDB gotchas already hit in this codebase:
 - boto3 resource is created lazily (`_table()`), which keeps imports cheap and tests mockable.
 - **Shared-costs authorization is membership, not ownership:** every group endpoint checks the caller is in `member_ids`, and expenses are checked against the group in the URL.
 - **Recurring expenses have no scheduler.** Due occurrences are generated when a group's expenses/balances are read, with deterministic ids (`<recurring_id>#<n>`) and a conditional put so they are never double-booked.
+- **Budget caps resolve most-specific first:** `CAP#2026-10` beats the `CAP#monthly` default; a year uses `CAP#2026`, then `CAP#yearly`, then the sum of its twelve monthly caps. Budget recurring entries use the same lazy `<recurring_id>#<n>` materialization as shared costs.
 
 ---
 
@@ -314,7 +320,7 @@ Two ways to run the frontend:
 - [ ] Calendar "today" window is computed in UTC, not local time
 - [ ] `/metrics` is publicly reachable through the tunnel
 - [x] Habits/shopping use `scan`; switch to a `user_id` GSI + `query` (done: both tables are keyed by `user_id`)
-- [ ] Budget, Shared Costs, Notes pages have no backend
+- [ ] Budget, Shared Costs pages have no backend
 - [ ] `infra/` and `k8s/` still describe the EC2 era
 
 ---
