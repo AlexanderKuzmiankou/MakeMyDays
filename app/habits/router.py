@@ -1,10 +1,16 @@
-from datetime import date
+from datetime import date, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, field_validator
 
 from app.auth.dependencies import get_current_user
-from app.habits.service import create_habit, delete_habit, list_habits, toggle_completion, update_habit
+from app.habits.service import (
+    create_habit,
+    delete_habit,
+    list_habits,
+    toggle_completion,
+    update_habit,
+)
 
 router = APIRouter()
 
@@ -16,8 +22,9 @@ def _not_blank(value: str | None) -> str | None:
 
 
 class HabitCreate(BaseModel):
+    """Create a habit class."""
     name: str = Field(max_length=40)
-    emoji: str = Field(default="⭐", max_length=16)  # emoji with modifiers span several code points
+    emoji: str = Field(default="⭐", max_length=16)
     goal_streak: int = Field(default=30, ge=1, le=365)
 
     _name = field_validator("name")(_not_blank)
@@ -25,7 +32,6 @@ class HabitCreate(BaseModel):
 
 class HabitUpdate(BaseModel):
     """Omitted fields are unchanged."""
-
     name: str | None = Field(default=None, max_length=40)
     emoji: str | None = Field(default=None, max_length=16)
     goal_streak: int | None = Field(default=None, ge=1, le=365)
@@ -39,21 +45,28 @@ class ToggleRequest(BaseModel):
     @field_validator("date")
     @classmethod
     def valid_date(cls, value: str) -> str:
-        return date.fromisoformat(value).isoformat()
+        """Check if the date is valid and not in the future"""
+        day = date.fromisoformat(value)
+        if day > date.today() + timedelta(days=1):
+            raise ValueError("Cannot mark a future day")
+        return day.isoformat()
 
 
 @router.get("/api/habits")
-def get_habits(user: dict = Depends(get_current_user)) -> list[dict]:
+def get_habits() -> list[dict]:
+    user = Depends(get_current_user)
     return list_habits(user["user_id"])
 
 
 @router.post("/api/habits", status_code=201)
-def post_habit(body: HabitCreate, user: dict = Depends(get_current_user)) -> dict:
+def post_habit(body: HabitCreate) -> dict:
+    user = Depends(get_current_user)
     return create_habit(user["user_id"], body.name, body.emoji, body.goal_streak)
 
 
 @router.patch("/api/habits/{habit_id}")
-def patch_habit(habit_id: str, body: HabitUpdate, user: dict = Depends(get_current_user)) -> dict:
+def patch_habit(habit_id: str, body: HabitUpdate) -> dict:
+    user= Depends(get_current_user)
     try:
         return update_habit(user["user_id"], habit_id, body.name, body.emoji, body.goal_streak)
     except ValueError as e:
@@ -61,7 +74,8 @@ def patch_habit(habit_id: str, body: HabitUpdate, user: dict = Depends(get_curre
 
 
 @router.post("/api/habits/{habit_id}/toggle")
-def post_toggle(habit_id: str, body: ToggleRequest, user: dict = Depends(get_current_user)) -> dict:
+def post_toggle(habit_id: str, body: ToggleRequest) -> dict:
+    user= Depends(get_current_user)
     try:
         return toggle_completion(user["user_id"], habit_id, body.date)
     except ValueError as e:
