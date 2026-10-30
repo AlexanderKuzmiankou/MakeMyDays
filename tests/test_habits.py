@@ -188,6 +188,26 @@ def test_toggle_rejects_bad_date(table):
     assert client.post(f"/api/habits/{habit['habit_id']}/toggle", json={"date": "tomorrow"}).status_code == 422
 
 
+def test_toggle_edits_history_retrospectively(table):
+    habit = _add()
+    url = f"/api/habits/{habit['habit_id']}/toggle"
+    for offset in (0, 1, 3):
+        client.post(url, json={"date": _day(offset)})
+    assert client.get("/api/habits").json()[0]["current_streak"] == 2
+
+    # Filling the missed day joins the two runs into one streak...
+    assert client.post(url, json={"date": _day(2)}).json()["current_streak"] == 4
+    # ...and removing a past day breaks it again.
+    assert client.post(url, json={"date": _day(1)}).json()["current_streak"] == 1
+
+
+def test_toggle_rejects_future_days(table):
+    habit = _add()
+    url = f"/api/habits/{habit['habit_id']}/toggle"
+    assert client.post(url, json={"date": _day(-1)}).status_code == 200  # time zone slack
+    assert client.post(url, json={"date": _day(-2)}).status_code == 422
+
+
 def test_toggle_missing_returns_404(table):
     assert client.post("/api/habits/no-such-id/toggle", json={"date": _day(0)}).status_code == 404
 
