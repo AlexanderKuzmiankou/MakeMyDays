@@ -53,20 +53,17 @@ class ToggleRequest(BaseModel):
 
 
 @router.get("/api/habits")
-def get_habits() -> list[dict]:
-    user = Depends(get_current_user)
+def get_habits(user: dict = Depends(get_current_user)) -> list[dict]:
     return list_habits(user["user_id"])
 
 
 @router.post("/api/habits", status_code=201)
-def post_habit(body: HabitCreate) -> dict:
-    user = Depends(get_current_user)
+def post_habit(body: HabitCreate, user: dict = Depends(get_current_user)) -> dict:
     return create_habit(user["user_id"], body.name, body.emoji, body.goal_streak)
 
 
 @router.patch("/api/habits/{habit_id}")
-def patch_habit(habit_id: str, body: HabitUpdate) -> dict:
-    user= Depends(get_current_user)
+def patch_habit(habit_id: str, body: HabitUpdate, user: dict = Depends(get_current_user)) -> dict:
     try:
         return update_habit(user["user_id"], habit_id, body.name, body.emoji, body.goal_streak)
     except ValueError as e:
@@ -74,8 +71,7 @@ def patch_habit(habit_id: str, body: HabitUpdate) -> dict:
 
 
 @router.post("/api/habits/{habit_id}/toggle")
-def post_toggle(habit_id: str, body: ToggleRequest) -> dict:
-    user= Depends(get_current_user)
+def post_toggle(habit_id: str, body: ToggleRequest, user: dict = Depends(get_current_user)) -> dict:
     try:
         return toggle_completion(user["user_id"], habit_id, body.date)
     except ValueError as e:
